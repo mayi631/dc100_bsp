@@ -65,85 +65,28 @@
 		poll-interval = <50>; // ms
 		debounce-steps = <2>; // 2次采样值相同才认为按键状态改变
 
-		button-mode {
-			label = "Mode";
-			linux,code = <KEY_MODE>;
-			press-threshold-microvolt = <0>;
-		};
-
 		button-left {
-			label = "Left";
-			linux,code = <KEY_LEFT>;
-			press-threshold-microvolt = <819000>;
+			label = "S Sw";
+			linux,code = <KEY_PLAY>;
+			press-threshold-microvolt = <21000>;
 		};
 
 		button-up {
 			label = "Up";
 			linux,code = <KEY_UP>;
-			press-threshold-microvolt = <1638000>;
-		};
-
-		button-right {
-			label = "Right";
-			linux,code = <KEY_RIGHT>;
-			press-threshold-microvolt = <2457000>;
+			press-threshold-microvolt = <820000>;
 		};
 
 		button-down {
 			label = "Down";
 			linux,code = <KEY_DOWN>;
-			press-threshold-microvolt = <3276000>;
+			press-threshold-microvolt = <1632000>;
 		};
 
 		button-ok {
 			label = "Ok";
 			linux,code = <KEY_OK>;
-			press-threshold-microvolt = <3822000>;
-		};
-	};
-
-	adc-key2 {
-		compatible = "adc-keys";
-		io-channels = <&saradc0 3>; // ADC4
-		io-channel-names = "buttons";
-		keyup-threshold-microvolt = <4095000>; // raw value
-		poll-interval = <50>; // ms
-		debounce-steps = <2>; // 2次采样值相同才认为按键状态改变
-
-		button-shot {
-			label = "Shot";
-			linux,code = <KEY_CAMERA>;
-			press-threshold-microvolt = <0>;
-		};
-
-		button-af {
-			label = "Camera Focus";
-			linux,code = <KEY_CAMERA_FOCUS>;
-			press-threshold-microvolt = <819000>;
-		};
-
-		button-s-sw {
-			label = "S Sw";
-			linux,code = <KEY_PLAY>;
-			press-threshold-microvolt = <1638000>;
-		};
-
-		button-zoom-in {
-			label = "Zoom In";
-			linux,code = <KEY_ZOOMIN>;
-			press-threshold-microvolt = <2457000>;
-		};
-
-		button-zoom-out {
-			label = "Zoom Out";
-			linux,code = <KEY_ZOOMOUT>;
-			press-threshold-microvolt = <3276000>;
-		};
-
-		button-menu {
-			label = "Menu";
-			linux,code = <KEY_MENU>;
-			press-threshold-microvolt = <3822000>;
+			press-threshold-microvolt = <2456000>;
 		};
 	};
 
@@ -151,7 +94,7 @@
 		compatible = "gpio-keys";
 		power {
 			label = "power";
-			gpios = <&porte 6 GPIO_ACTIVE_LOW>;
+			gpios = <&porte 6 GPIO_ACTIVE_HIGH>;
 			linux,code = <KEY_POWER>;
 		};
 	};
@@ -173,17 +116,18 @@
 	/* gpio port */
 	scl-gpios = <&porta 28 GPIO_ACTIVE_HIGH>;
 	sda-gpios = <&porta 29 GPIO_ACTIVE_HIGH>;
+	clock-frequency = <100000>;
 
 	hynitron@5A {
-		compatible = "hyn,226se";
+		compatible = "hyn,7xx";
 		reg = <0x5A>;
 		reset-gpio = <&porta 30 GPIO_ACTIVE_LOW>;
 		irq-gpio = <&porta 14 GPIO_ACTIVE_LOW>;
 		max-touch-number = <5>;
-		display-coords = <0 0 480 640>;
+		display-coords = <0 0 360 640>;
 		pos-swap = <1>;
-		posx-reverse = <1>;
-		posy-reverse = <0>;
+		posx-reverse = <0>;
+		posy-reverse = <1>;
 	};
 
 	pcf8563: pcf8563@51 {

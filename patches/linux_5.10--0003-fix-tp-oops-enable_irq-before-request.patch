@@ -1,0 +1,47 @@
+From eae5e317cf04ab46e57de330ce3460423475ee0e Mon Sep 17 00:00:00 2001
+From: "xiu.yang" <xiu.yang@sophgo.com>
+Date: Mon, 19 Jan 2026 16:18:21 +0800
+Subject: [PATCH] fix:(tp)oops enable_irq before request
+
+Change-Id: I323207de51b1dbcc74d02f1d8e92e7e76ed6bb58
+---
+ .../input/touchscreen/hyn/hyn_chips/hyn_cst7xx.c | 16 ++++++++--------
+ 1 file changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/input/touchscreen/hyn/hyn_chips/hyn_cst7xx.c b/drivers/input/touchscreen/hyn/hyn_chips/hyn_cst7xx.c
+index fd87299e7..766b969aa 100644
+--- a/drivers/input/touchscreen/hyn/hyn_chips/hyn_cst7xx.c
++++ b/drivers/input/touchscreen/hyn/hyn_chips/hyn_cst7xx.c
+@@ -368,13 +368,13 @@ static int cst7xx_set_workmode(enum work_mode mode,u8 enable)
+     int ret = -1;
+     hyn_esdcheck_switch(hyn_7xxdata,mode==NOMAL_MODE? enable : DISABLE);
+     msleep(1); //trig task switch
+-    switch(mode){
+-        case NOMAL_MODE:
+-            hyn_irq_set(hyn_7xxdata,ENABLE);
+-            ret = hyn_wr_reg(hyn_7xxdata,0xFE00,2,NULL,0);
+-            break;
+-        case GESTURE_MODE:
+-            ret = hyn_wr_reg(hyn_7xxdata,0xD001,2,NULL,0);
++    switch (mode) {
++    case NOMAL_MODE:
++	    // hyn_irq_set(hyn_7xxdata,ENABLE);
++	    ret = hyn_wr_reg(hyn_7xxdata, 0xFE00, 2, NULL, 0);
++	    break;
++    case GESTURE_MODE:
++	    ret = hyn_wr_reg(hyn_7xxdata,0xD001,2,NULL,0);
+             break;
+         case DIFF_MODE:
+         case RAWDATA_MODE:
+@@ -401,7 +401,7 @@ static int cst7xx_set_workmode(enum work_mode mode,u8 enable)
+         default :
+             ret = -2;
+             break;
+-    }
++	}
+     if(ret != -2){
+         hyn_7xxdata->work_mode = mode;
+     }
+-- 
+2.25.1
+

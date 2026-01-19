@@ -13,11 +13,14 @@ fi
 OLD="$1"
 NEW="$2"
 
+# 排除的文件夹列表
+# EXCLUDE_DIRS="manifest .git patches"
+
 echo "=== 开始替换 '$OLD' → '$NEW' ==="
 
 # === 第1阶段：替换文件内容 ===
 echo "--- 替换文件内容 ---"
-find . -type f -not -path "*/.git/*" -not -path "./.git" | while read -r file; do
+find . -type f \( -path "*/.git" -prune -o -path "*/manifest/*" -prune -o -path "*/patches/*" -prune -o -print \) | while read -r file; do
     # 跳过二进制文件
     if file "$file" | grep -q "text"; then
         # 使用 sed 替换
@@ -28,7 +31,7 @@ done
 
 # === 第2阶段：重命名文件（从深层路径开始）===
 echo "--- 重命名文件 ---"
-find . -depth -type f -name "*${OLD}*" -not -path "*/.git/*" -not -path "./.git" | while read -r file; do
+find . -depth -type f -name "*${OLD}*" \( -path "*/.git" -prune -o -path "*/manifest/*" -prune -o -path "*/patches/*" -prune -o -print \) | while read -r file; do
     newfile="$(dirname "$file")/$(basename "$file" | sed "s/${OLD}/${NEW}/g")"
     mv "$file" "$newfile"
     echo "文件重命名: $file → $newfile"
@@ -36,7 +39,7 @@ done
 
 # === 第3阶段：重命名目录 ===
 echo "--- 重命名目录 ---"
-find . -depth -type d -name "*${OLD}*" -not -path "*/.git/*" -not -path "./.git" | while read -r dir; do
+find . -depth -type d -name "*${OLD}*" \( -path "*/.git" -prune -o -path "*/manifest/*" -prune -o -path "*/patches/*" -prune -o -print \) | while read -r dir; do
     newdir="$(dirname "$dir")/$(basename "$dir" | sed "s/${OLD}/${NEW}/g")"
     mv "$dir" "$newdir"
     echo "目录重命名: $dir → $newdir"

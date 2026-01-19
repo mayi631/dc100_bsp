@@ -1,0 +1,27 @@
+From b5f355a317e3c25f265180e3321d6f5ace8052f1 Mon Sep 17 00:00:00 2001
+From: "xiu.yang" <xiu.yang@sophgo.com>
+Date: Mon, 5 Jan 2026 15:45:55 +0800
+Subject: [PATCH] feat:(sensor): support gc4683 [affected]: [description ]:
+ [root cause  ]: NA [mantis id   ]: NA [chip project]: NA [confirm test]: NA
+ [side effects]: NA
+
+Change-Id: Iae0615c92ad065d34020bb08fe8f20c167bc07d2
+---
+ sensors/sensor_list.json | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/sensors/sensor_list.json b/sensors/sensor_list.json
+index ff5cbba6..1b603f47 100644
+--- a/sensors/sensor_list.json
++++ b/sensors/sensor_list.json
+@@ -14,6 +14,7 @@
+ 		"GCORE_GC4023",
+ 		"GCORE_GC4653",
+ 		"GCORE_GC4653_SLAVE",
++		"GCORE_GC4683",
+ 		"GCORE_GC8613",
+ 		"NEXTCHIP_N5",
+ 		"NEXTCHIP_N6",
+-- 
+2.25.1
+

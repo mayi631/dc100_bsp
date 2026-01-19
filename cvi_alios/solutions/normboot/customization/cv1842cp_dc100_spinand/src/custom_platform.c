@@ -240,9 +240,10 @@ void PLATFORM_PowerOff(void)
 void _PanelPinmux(void)
 {
 	// PWR_SEQ1 pinmux unlock
-	printf("PWR_SEQ1 pinmux unlock\n");
-	mmio_write_32(0x05027078, 0x11);
-	PINMUX_CONFIG(PWR_SEQ1, PWR_GPIO_3); // LCD_RST
+	// printf("PWR_SEQ1 pinmux unlock\n");
+	// mmio_write_32(0x05027078, 0x11);
+	// PINMUX_CONFIG(PWR_SEQ1, PWR_GPIO_3); // LCD_RST
+	PINMUX_CONFIG(SPK_EN, XGPIOA_15); // LCD_RST
 	PINMUX_CONFIG(JTAG_CPU_TCK, PWM_6); // LCD_BL
 }
 
@@ -319,7 +320,7 @@ int PLATFORM_PanelInit(void)
 	udelay(20 * 1000);
 	_GPIOSetValue(rst_port, rst_pin, 1);
 	udelay(20 * 1000);
-#elif CONFIG_PANEL_BJX2836F0
+#elif CONFIG_PANEL_LY030BXMS
 	u8 rst_port = 0, rst_pin = 15;
 	_GPIOSetValue(rst_port, rst_pin, 1);
 	udelay(20 * 1000);
