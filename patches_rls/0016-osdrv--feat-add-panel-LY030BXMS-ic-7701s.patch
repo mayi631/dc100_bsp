@@ -1,0 +1,565 @@
+From 6bc16d04f47a818ae955bf0a8367ea415710c13a Mon Sep 17 00:00:00 2001
+From: "song.yu" <song.yu@sophgo.com>
+Date: Wed, 24 Dec 2025 15:42:32 +0800
+Subject: [PATCH] feat: add panel LY030BXMS, ic:7701s
+
+Change-Id: I189167289f6f72ed103aa1aa9dee69cec0735d92
+---
+ interdrv/vo/driver/vo_sdk_layer.c         | 500 +++++++++++++++++-----
+ interdrv/vo/platform/alios/proc/vo_proc.c |   7 +-
+ interdrv/vo/platform/linux/proc/vo_proc.c |   5 +-
+ 3 files changed, 401 insertions(+), 111 deletions(-)
+
+diff --git a/interdrv/vo/driver/vo_sdk_layer.c b/interdrv/vo/driver/vo_sdk_layer.c
+index f015749..e044e11 100644
+--- a/interdrv/vo/driver/vo_sdk_layer.c
++++ b/interdrv/vo/driver/vo_sdk_layer.c
+@@ -171,114 +171,398 @@ struct vo_fmt vo_sdk_formats[] = {
+ };
+ 
+ vo_sync_info_s sync_info[VO_OUTPUT_BUTT] = {
+-	[VO_OUTPUT_800x600_60] = {.synm = 1, .iop = 1, .frame_rate = 60
+-		, .vact = 600, .vbb = 24, .vfb = 1
+-		, .hact = 800, .hbb = 88, .hfb = 40
+-		, .vpw = 4, .hpw = 128, .idv = 0, .ihs = 0, .ivs = 0},
+-	[VO_OUTPUT_1080P24] = {.synm = 1, .iop = 1, .frame_rate = 24
+-		, .vact = 1080, .vbb = 36, .vfb = 4
+-		, .hact = 1920, .hbb = 148, .hfb = 638
+-		, .vpw = 5, .hpw = 44, .idv = 0, .ihs = 0, .ivs = 0},
+-	[VO_OUTPUT_1080P25] = {.synm = 1, .iop = 1, .frame_rate = 25
+-		, .vact = 1080, .vbb = 36, .vfb = 4
+-		, .hact = 1920, .hbb = 148, .hfb = 528
+-		, .vpw = 5, .hpw = 44, .idv = 0, .ihs = 0, .ivs = 0},
+-	[VO_OUTPUT_1080P30] = {.synm = 1, .iop = 1, .frame_rate = 30
+-		, .vact = 1080, .vbb = 36, .vfb = 4
+-		, .hact = 1920, .hbb = 148, .hfb = 88
+-		, .vpw = 5, .hpw = 44, .idv = 0, .ihs = 0, .ivs = 0},
+-	[VO_OUTPUT_720P50] = {.synm = 1, .iop = 1, .frame_rate = 50
+-		, .vact = 720, .vbb = 20, .vfb = 5
+-		, .hact = 1280, .hbb = 220, .hfb = 440
+-		, .vpw = 5, .hpw = 40, .idv = 0, .ihs = 0, .ivs = 0},
+-	[VO_OUTPUT_720P60] = {.synm = 1, .iop = 1, .frame_rate = 60
+-		, .vact = 720, .vbb = 20, .vfb = 5
+-		, .hact = 1280, .hbb = 220, .hfb = 110
+-		, .vpw = 5, .hpw = 40, .idv = 0, .ihs = 0, .ivs = 0},
+-	[VO_OUTPUT_1080P50] = {.synm = 1, .iop = 1, .frame_rate = 50
+-		, .vact = 1080, .vbb = 36, .vfb = 4
+-		, .hact = 1920, .hbb = 148, .hfb = 528
+-		, .vpw = 5, .hpw = 44, .idv = 0, .ihs = 0, .ivs = 0},
+-	[VO_OUTPUT_1080P60] = {.synm = 1, .iop = 1, .frame_rate = 60
+-		, .vact = 1080, .vbb = 36, .vfb = 4
+-		, .hact = 1920, .hbb = 148, .hfb = 88
+-		, .vpw = 5, .hpw = 44, .idv = 0, .ihs = 0, .ivs = 0},
+-	[VO_OUTPUT_576P50] = {.synm = 1, .iop = 1, .frame_rate = 50
+-		, .vact = 576, .vbb = 39, .vfb = 5
+-		, .hact = 720, .hbb = 68, .hfb = 12
+-		, .vpw = 5, .hpw = 64, .idv = 0, .ihs = 0, .ivs = 0},
+-	[VO_OUTPUT_480P60] = {.synm = 1, .iop = 1, .frame_rate = 60
+-		, .vact = 480, .vbb = 30, .vfb = 9
+-		, .hact = 720, .hbb = 60, .hfb = 16
+-		, .vpw = 6, .hpw = 62, .idv = 0, .ihs = 0, .ivs = 0},
+-	[VO_OUTPUT_720x1280_60] = {.synm = 1, .iop = 1, .frame_rate = 60
+-		, .vact = 1280, .vbb = 4, .vfb = 6
+-		, .hact = 720, .hbb = 36, .hfb = 128
+-		, .vpw = 16, .hpw = 64, .idv = 0, .ihs = 0, .ivs = 1},
+-	[VO_OUTPUT_1080x1920_60] = {.synm = 1, .iop = 1, .frame_rate = 60
+-		, .vact = 1920, .vbb = 36, .vfb = 6
+-		, .hact = 1080, .hbb = 148, .hfb = 88
+-		, .vpw = 16, .hpw = 64, .idv = 0, .ihs = 0, .ivs = 1},
+-	[VO_OUTPUT_480x800_60] = {.synm = 1, .iop = 1, .frame_rate = 60
+-		, .vact = 800, .vbb = 20, .vfb = 20
+-		, .hact = 480, .hbb = 50, .hfb = 50
+-		, .vpw = 10, .hpw = 10, .idv = 0, .ihs = 0, .ivs = 1},
+-	[VO_OUTPUT_1440P60] = {.synm = 1, .iop = 1, .frame_rate = 60
+-		, .vact = 1440, .vbb = 33, .vfb = 3
+-		, .hact = 2560, .hbb = 80, .hfb = 32
+-		, .vpw = 5, .hpw = 48, .idv = 0, .ihs = 1, .ivs = 0},
+-	[VO_OUTPUT_2160P24] = {.synm = 1, .iop = 1, .frame_rate = 24
+-		, .vact = 2160, .vbb = 72, .vfb = 8
+-		, .hact = 3840, .hbb = 296, .hfb = 1276
+-		, .vpw = 10, .hpw = 88, .idv = 0, .ihs = 1, .ivs = 0},
+-	[VO_OUTPUT_2160P25] = {.synm = 1, .iop = 1, .frame_rate = 25
+-		, .vact = 2160, .vbb = 72, .vfb = 8
+-		, .hact = 3840, .hbb = 296, .hfb = 1056
+-		, .vpw = 10, .hpw = 88, .idv = 0, .ihs = 1, .ivs = 0},
+-	[VO_OUTPUT_2160P30] = {.synm = 1, .iop = 1, .frame_rate = 30
+-		, .vact = 2160, .vbb = 72, .vfb = 8
+-		, .hact = 3840, .hbb = 296, .hfb = 176
+-		, .vpw = 10, .hpw = 88, .idv = 0, .ihs = 1, .ivs = 0},
+-	[VO_OUTPUT_2160P50] = {.synm = 1, .iop = 1, .frame_rate = 50
+-		, .vact = 2160, .vbb = 72, .vfb = 8
+-		, .hact = 3840, .hbb = 296, .hfb = 1056
+-		, .vpw = 10, .hpw = 88, .idv = 0, .ihs = 1, .ivs = 0},
+-	[VO_OUTPUT_2160P60] = {.synm = 1, .iop = 1, .frame_rate = 60
+-		, .vact = 2160, .vbb = 72, .vfb = 8
+-		, .hact = 3840, .hbb = 296, .hfb = 176
+-		, .vpw = 10, .hpw = 88, .idv = 0, .ihs = 1, .ivs = 0},
+-	[VO_OUTPUT_4096x2160P24] = {.synm = 1, .iop = 1, .frame_rate = 24
+-		, .vact = 2160, .vbb = 72, .vfb = 8
+-		, .hact = 4096, .hbb = 296, .hfb = 1020
+-		, .vpw = 10, .hpw = 88, .idv = 0, .ihs = 1, .ivs = 1},
+-	[VO_OUTPUT_4096x2160P25] = {.synm = 1, .iop = 1, .frame_rate = 25
+-		, .vact = 2160, .vbb = 72, .vfb = 8
+-		, .hact = 4096, .hbb = 128, .hfb = 968
+-		, .vpw = 10, .hpw = 88, .idv = 0, .ihs = 1, .ivs = 1},
+-	[VO_OUTPUT_4096x2160P30] = {.synm = 1, .iop = 1, .frame_rate = 30
+-		, .vact = 2160, .vbb = 72, .vfb = 8
+-		, .hact = 4096, .hbb = 128, .hfb = 88
+-		, .vpw = 10, .hpw = 88, .idv = 0, .ihs = 1, .ivs = 1},
+-	[VO_OUTPUT_4096x2160P50] = {.synm = 1, .iop = 1, .frame_rate = 50
+-		, .vact = 2160, .vbb = 72, .vfb = 8
+-		, .hact = 4096, .hbb = 128, .hfb = 968
+-		, .vpw = 10, .hpw = 88, .idv = 0, .ihs = 1, .ivs = 1},
+-	[VO_OUTPUT_4096x2160P60] = {.synm = 1, .iop = 1, .frame_rate = 60
+-		, .vact = 2160, .vbb = 72, .vfb = 8
+-		, .hact = 4096, .hbb = 128, .hfb = 88
+-		, .vpw = 10, .hpw = 88, .idv = 0, .ihs = 1, .ivs = 1},
+-	[VO_OUTPUT_640x480_60] = {.synm = 1, .iop = 1, .frame_rate = 60
+-		, .vact = 480, .vbb = 12, .vfb = 20
+-		, .hact = 640, .hbb = 120, .hfb = 150
+-		, .vpw = 6, .hpw = 62, .idv = 0, .ihs = 0, .ivs = 0},
+-	[VO_OUTPUT_440x1920_60] = {.synm = 1, .iop = 1, .frame_rate = 60
+-		, .vact = 1920, .vbb = 30, .vfb = 150
+-		, .hact = 440, .hbb = 50, .hfb = 150
+-		, .vpw = 20, .hpw = 30, .idv = 0, .ihs = 1, .ivs = 0},
+-	[VO_OUTPUT_480x640_60] = {.synm = 1, .iop = 1, .frame_rate = 60
+-		, .vact = 640, .vbb = 30, .vfb = 14
+-		, .hact = 480, .hbb = 37, .hfb = 37
+-		, .vpw = 6, .hpw = 30, .idv = 0, .ihs = 0, .ivs = 1},
++    [VO_OUTPUT_800x600_60] = {.synm = 1,
++                              .iop = 1,
++                              .frame_rate = 60,
++                              .vact = 600,
++                              .vbb = 24,
++                              .vfb = 1,
++                              .hact = 800,
++                              .hbb = 88,
++                              .hfb = 40,
++                              .vpw = 4,
++                              .hpw = 128,
++                              .idv = 0,
++                              .ihs = 0,
++                              .ivs = 0},
++    [VO_OUTPUT_1080P24] = {.synm = 1,
++                           .iop = 1,
++                           .frame_rate = 24,
++                           .vact = 1080,
++                           .vbb = 36,
++                           .vfb = 4,
++                           .hact = 1920,
++                           .hbb = 148,
++                           .hfb = 638,
++                           .vpw = 5,
++                           .hpw = 44,
++                           .idv = 0,
++                           .ihs = 0,
++                           .ivs = 0},
++    [VO_OUTPUT_1080P25] = {.synm = 1,
++                           .iop = 1,
++                           .frame_rate = 25,
++                           .vact = 1080,
++                           .vbb = 36,
++                           .vfb = 4,
++                           .hact = 1920,
++                           .hbb = 148,
++                           .hfb = 528,
++                           .vpw = 5,
++                           .hpw = 44,
++                           .idv = 0,
++                           .ihs = 0,
++                           .ivs = 0},
++    [VO_OUTPUT_1080P30] = {.synm = 1,
++                           .iop = 1,
++                           .frame_rate = 30,
++                           .vact = 1080,
++                           .vbb = 36,
++                           .vfb = 4,
++                           .hact = 1920,
++                           .hbb = 148,
++                           .hfb = 88,
++                           .vpw = 5,
++                           .hpw = 44,
++                           .idv = 0,
++                           .ihs = 0,
++                           .ivs = 0},
++    [VO_OUTPUT_720P50] = {.synm = 1,
++                          .iop = 1,
++                          .frame_rate = 50,
++                          .vact = 720,
++                          .vbb = 20,
++                          .vfb = 5,
++                          .hact = 1280,
++                          .hbb = 220,
++                          .hfb = 440,
++                          .vpw = 5,
++                          .hpw = 40,
++                          .idv = 0,
++                          .ihs = 0,
++                          .ivs = 0},
++    [VO_OUTPUT_720P60] = {.synm = 1,
++                          .iop = 1,
++                          .frame_rate = 60,
++                          .vact = 720,
++                          .vbb = 20,
++                          .vfb = 5,
++                          .hact = 1280,
++                          .hbb = 220,
++                          .hfb = 110,
++                          .vpw = 5,
++                          .hpw = 40,
++                          .idv = 0,
++                          .ihs = 0,
++                          .ivs = 0},
++    [VO_OUTPUT_1080P50] = {.synm = 1,
++                           .iop = 1,
++                           .frame_rate = 50,
++                           .vact = 1080,
++                           .vbb = 36,
++                           .vfb = 4,
++                           .hact = 1920,
++                           .hbb = 148,
++                           .hfb = 528,
++                           .vpw = 5,
++                           .hpw = 44,
++                           .idv = 0,
++                           .ihs = 0,
++                           .ivs = 0},
++    [VO_OUTPUT_1080P60] = {.synm = 1,
++                           .iop = 1,
++                           .frame_rate = 60,
++                           .vact = 1080,
++                           .vbb = 36,
++                           .vfb = 4,
++                           .hact = 1920,
++                           .hbb = 148,
++                           .hfb = 88,
++                           .vpw = 5,
++                           .hpw = 44,
++                           .idv = 0,
++                           .ihs = 0,
++                           .ivs = 0},
++    [VO_OUTPUT_576P50] = {.synm = 1,
++                          .iop = 1,
++                          .frame_rate = 50,
++                          .vact = 576,
++                          .vbb = 39,
++                          .vfb = 5,
++                          .hact = 720,
++                          .hbb = 68,
++                          .hfb = 12,
++                          .vpw = 5,
++                          .hpw = 64,
++                          .idv = 0,
++                          .ihs = 0,
++                          .ivs = 0},
++    [VO_OUTPUT_480P60] = {.synm = 1,
++                          .iop = 1,
++                          .frame_rate = 60,
++                          .vact = 480,
++                          .vbb = 30,
++                          .vfb = 9,
++                          .hact = 720,
++                          .hbb = 60,
++                          .hfb = 16,
++                          .vpw = 6,
++                          .hpw = 62,
++                          .idv = 0,
++                          .ihs = 0,
++                          .ivs = 0},
++    [VO_OUTPUT_720x1280_60] = {.synm = 1,
++                               .iop = 1,
++                               .frame_rate = 60,
++                               .vact = 1280,
++                               .vbb = 4,
++                               .vfb = 6,
++                               .hact = 720,
++                               .hbb = 36,
++                               .hfb = 128,
++                               .vpw = 16,
++                               .hpw = 64,
++                               .idv = 0,
++                               .ihs = 0,
++                               .ivs = 1},
++    [VO_OUTPUT_1080x1920_60] = {.synm = 1,
++                                .iop = 1,
++                                .frame_rate = 60,
++                                .vact = 1920,
++                                .vbb = 36,
++                                .vfb = 6,
++                                .hact = 1080,
++                                .hbb = 148,
++                                .hfb = 88,
++                                .vpw = 16,
++                                .hpw = 64,
++                                .idv = 0,
++                                .ihs = 0,
++                                .ivs = 1},
++    [VO_OUTPUT_480x800_60] = {.synm = 1,
++                              .iop = 1,
++                              .frame_rate = 60,
++                              .vact = 800,
++                              .vbb = 20,
++                              .vfb = 20,
++                              .hact = 480,
++                              .hbb = 50,
++                              .hfb = 50,
++                              .vpw = 10,
++                              .hpw = 10,
++                              .idv = 0,
++                              .ihs = 0,
++                              .ivs = 1},
++    [VO_OUTPUT_1440P60] = {.synm = 1,
++                           .iop = 1,
++                           .frame_rate = 60,
++                           .vact = 1440,
++                           .vbb = 33,
++                           .vfb = 3,
++                           .hact = 2560,
++                           .hbb = 80,
++                           .hfb = 32,
++                           .vpw = 5,
++                           .hpw = 48,
++                           .idv = 0,
++                           .ihs = 1,
++                           .ivs = 0},
++    [VO_OUTPUT_2160P24] = {.synm = 1,
++                           .iop = 1,
++                           .frame_rate = 24,
++                           .vact = 2160,
++                           .vbb = 72,
++                           .vfb = 8,
++                           .hact = 3840,
++                           .hbb = 296,
++                           .hfb = 1276,
++                           .vpw = 10,
++                           .hpw = 88,
++                           .idv = 0,
++                           .ihs = 1,
++                           .ivs = 0},
++    [VO_OUTPUT_2160P25] = {.synm = 1,
++                           .iop = 1,
++                           .frame_rate = 25,
++                           .vact = 2160,
++                           .vbb = 72,
++                           .vfb = 8,
++                           .hact = 3840,
++                           .hbb = 296,
++                           .hfb = 1056,
++                           .vpw = 10,
++                           .hpw = 88,
++                           .idv = 0,
++                           .ihs = 1,
++                           .ivs = 0},
++    [VO_OUTPUT_2160P30] = {.synm = 1,
++                           .iop = 1,
++                           .frame_rate = 30,
++                           .vact = 2160,
++                           .vbb = 72,
++                           .vfb = 8,
++                           .hact = 3840,
++                           .hbb = 296,
++                           .hfb = 176,
++                           .vpw = 10,
++                           .hpw = 88,
++                           .idv = 0,
++                           .ihs = 1,
++                           .ivs = 0},
++    [VO_OUTPUT_2160P50] = {.synm = 1,
++                           .iop = 1,
++                           .frame_rate = 50,
++                           .vact = 2160,
++                           .vbb = 72,
++                           .vfb = 8,
++                           .hact = 3840,
++                           .hbb = 296,
++                           .hfb = 1056,
++                           .vpw = 10,
++                           .hpw = 88,
++                           .idv = 0,
++                           .ihs = 1,
++                           .ivs = 0},
++    [VO_OUTPUT_2160P60] = {.synm = 1,
++                           .iop = 1,
++                           .frame_rate = 60,
++                           .vact = 2160,
++                           .vbb = 72,
++                           .vfb = 8,
++                           .hact = 3840,
++                           .hbb = 296,
++                           .hfb = 176,
++                           .vpw = 10,
++                           .hpw = 88,
++                           .idv = 0,
++                           .ihs = 1,
++                           .ivs = 0},
++    [VO_OUTPUT_4096x2160P24] = {.synm = 1,
++                                .iop = 1,
++                                .frame_rate = 24,
++                                .vact = 2160,
++                                .vbb = 72,
++                                .vfb = 8,
++                                .hact = 4096,
++                                .hbb = 296,
++                                .hfb = 1020,
++                                .vpw = 10,
++                                .hpw = 88,
++                                .idv = 0,
++                                .ihs = 1,
++                                .ivs = 1},
++    [VO_OUTPUT_4096x2160P25] = {.synm = 1,
++                                .iop = 1,
++                                .frame_rate = 25,
++                                .vact = 2160,
++                                .vbb = 72,
++                                .vfb = 8,
++                                .hact = 4096,
++                                .hbb = 128,
++                                .hfb = 968,
++                                .vpw = 10,
++                                .hpw = 88,
++                                .idv = 0,
++                                .ihs = 1,
++                                .ivs = 1},
++    [VO_OUTPUT_4096x2160P30] = {.synm = 1,
++                                .iop = 1,
++                                .frame_rate = 30,
++                                .vact = 2160,
++                                .vbb = 72,
++                                .vfb = 8,
++                                .hact = 4096,
++                                .hbb = 128,
++                                .hfb = 88,
++                                .vpw = 10,
++                                .hpw = 88,
++                                .idv = 0,
++                                .ihs = 1,
++                                .ivs = 1},
++    [VO_OUTPUT_4096x2160P50] = {.synm = 1,
++                                .iop = 1,
++                                .frame_rate = 50,
++                                .vact = 2160,
++                                .vbb = 72,
++                                .vfb = 8,
++                                .hact = 4096,
++                                .hbb = 128,
++                                .hfb = 968,
++                                .vpw = 10,
++                                .hpw = 88,
++                                .idv = 0,
++                                .ihs = 1,
++                                .ivs = 1},
++    [VO_OUTPUT_4096x2160P60] = {.synm = 1,
++                                .iop = 1,
++                                .frame_rate = 60,
++                                .vact = 2160,
++                                .vbb = 72,
++                                .vfb = 8,
++                                .hact = 4096,
++                                .hbb = 128,
++                                .hfb = 88,
++                                .vpw = 10,
++                                .hpw = 88,
++                                .idv = 0,
++                                .ihs = 1,
++                                .ivs = 1},
++    [VO_OUTPUT_640x480_60] = {.synm = 1,
++                              .iop = 1,
++                              .frame_rate = 60,
++                              .vact = 480,
++                              .vbb = 12,
++                              .vfb = 20,
++                              .hact = 640,
++                              .hbb = 120,
++                              .hfb = 150,
++                              .vpw = 6,
++                              .hpw = 62,
++                              .idv = 0,
++                              .ihs = 0,
++                              .ivs = 0},
++    [VO_OUTPUT_440x1920_60] = {.synm = 1,
++                               .iop = 1,
++                               .frame_rate = 60,
++                               .vact = 1920,
++                               .vbb = 30,
++                               .vfb = 150,
++                               .hact = 440,
++                               .hbb = 50,
++                               .hfb = 150,
++                               .vpw = 20,
++                               .hpw = 30,
++                               .idv = 0,
++                               .ihs = 1,
++                               .ivs = 0},
++    [VO_OUTPUT_480x640_60] = {.synm = 1,
++                              .iop = 1,
++                              .frame_rate = 60,
++                              .vact = 640,
++                              .vbb = 30,
++                              .vfb = 14,
++                              .hact = 480,
++                              .hbb = 37,
++                              .hfb = 37,
++                              .vpw = 6,
++                              .hpw = 30,
++                              .idv = 0,
++                              .ihs = 0,
++                              .ivs = 1},
++    [VO_OUTPUT_360x640_60] = {.synm = 1,
++                              .iop = 1,
++                              .frame_rate = 60,
++                              .vact = 640,
++                              .vbb = 20,
++                              .vfb = 20,
++                              .hact = 480,
++                              .hbb = 80,
++                              .hfb = 80,
++                              .vpw = 6,
++                              .hpw = 30,
++                              .idv = 0,
++                              .ihs = 0,
++                              .ivs = 1},
+ };
+ 
+ const struct disp_pattern patterns[VO_PAT_MAX] = {
+diff --git a/interdrv/vo/platform/alios/proc/vo_proc.c b/interdrv/vo/platform/alios/proc/vo_proc.c
+index e6b7306..7ed05b9 100644
+--- a/interdrv/vo/platform/alios/proc/vo_proc.c
++++ b/interdrv/vo/platform/alios/proc/vo_proc.c
+@@ -124,7 +124,10 @@ static void intf_sync_to_string(vo_intf_sync_e intf_sync, char *str, int len)
+ 		break;
+ 	case VO_OUTPUT_480x640_60:
+ 		strncpy(str, "480x640@60", len);
+-	break;
++		break;
++	case VO_OUTPUT_360x640_60:
++		strncpy(str, "360x640@60", len);
++		break;
+ 	case VO_OUTPUT_1440P60:
+ 		strncpy(str, "1440P@60", len);
+ 		break;
+@@ -453,4 +456,4 @@ static void vo_proc_show(int32_t argc, char **argv)
+ 	vo_show_status();
+ }
+ ALIOS_CLI_CMD_REGISTER(vo_proc_show, proc_vo, vo info);
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/interdrv/vo/platform/linux/proc/vo_proc.c b/interdrv/vo/platform/linux/proc/vo_proc.c
+index 50b9720..b559295 100644
+--- a/interdrv/vo/platform/linux/proc/vo_proc.c
++++ b/interdrv/vo/platform/linux/proc/vo_proc.c
+@@ -121,7 +121,10 @@ static void intf_sync_to_string(vo_intf_sync_e intf_sync, char *str, int len)
+ 		break;
+ 	case VO_OUTPUT_480x640_60:
+ 		strncpy(str, "480x640@60", len);
+-	break;
++		break;
++	case VO_OUTPUT_360x640_60:
++		strncpy(str, "360x640@60", len);
++		break;
+ 	case VO_OUTPUT_1440P60:
+ 		strncpy(str, "1440P@60", len);
+ 		break;
+-- 
+2.34.1
+

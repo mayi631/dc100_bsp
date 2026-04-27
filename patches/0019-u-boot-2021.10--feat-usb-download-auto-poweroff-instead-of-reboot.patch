@@ -1,0 +1,172 @@
+From d600d2c220c6596312574f4cca9da31405fbf92e Mon Sep 17 00:00:00 2001
+From: "song.yu" <song.yu@sophgo.com>
+Date: Mon, 26 Jan 2026 18:50:27 +0800
+Subject: [PATCH] feat: enable SD DL, & usb download auto poweroff
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+1. 增加SD卡升级; (写efuse时不disable SD DL）
+2. USB升级后处于开机，改为更新后自动关机.
+(之前是看门狗重启，改为poweroff的逻辑）
+
+Change-Id: Ifcfc3be2964bbe2d00c527498a3bb772b0e68822
+---
+ cmd/cvi_update.c                       | 43 ++++++++++++++++++++++++++
+ cmd/efuse.c                            |  7 +++--
+ drivers/cvi_usb/utask/cv181x/usb_tty.c | 39 ++++++++++++++++++-----
+ 3 files changed, 79 insertions(+), 10 deletions(-)
+
+diff --git a/cmd/cvi_update.c b/cmd/cvi_update.c
+index fb70619a41..f3dd22bd20 100644
+--- a/cmd/cvi_update.c
++++ b/cmd/cvi_update.c
+@@ -10,6 +10,7 @@
+ #ifdef CONFIG_NAND_SUPPORT
+ #include <nand.h>
+ #endif
++#include "mmio.h"
+ #include "cvi_update.h"
+ 
+ #define COMPARE_STRING_LEN 3
+@@ -465,6 +466,20 @@ static int _uart_update(void)
+ 	return ret;
+ }
+ 
++static void ai_led_lightup(void)
++{
++	/*
++	 * Set GPIOB[27] to output high level when starting upgrade
++	 * Pinmux: 0x03001130 = 3 (GPIO mode)
++	 * GPIO Base: 0x03021000
++	 * Port B Data Register (DR): 0x03021000
++	 * Port B Direction Register (DDR): 0x03021004
++	 */
++	mmio_write_32(0x03001130, 3);           // Set pinmux to GPIO mode
++	mmio_write_32(0x03021004, (1 << 27) | mmio_read_32(0x03021004));   // Set GPIOB[27] as output
++	mmio_write_32(0x03021000, (1 << 27) | mmio_read_32(0x03021000));   // Set GPIOB[27] output high
++}
++
+ static int do_cvi_update(struct cmd_tbl *cmdtp, int flag, int argc,
+ 			 char *const argv[])
+ {
+@@ -477,6 +492,7 @@ static int do_cvi_update(struct cmd_tbl *cmdtp, int flag, int argc,
+ 			run_command("env default -a", 0);
+ 			ret = _uart_update();
+ 		} else if (update_magic == SD_UPDATE_MAGIC) {
++			ai_led_lightup();
+ 			run_command("env default -a", 0);
+ 			ret = _storage_update(sd_dl);
+ 		} else if (update_magic == USB_UPDATE_MAGIC) {
+@@ -486,6 +502,7 @@ static int do_cvi_update(struct cmd_tbl *cmdtp, int flag, int argc,
+ 				return -1;
+ 			}
+ 			#endif
++			ai_led_lightup();
+ 			run_command("env default -a", 0);
+ 			usb_pid = in_be32(UBOOT_PID_SRAM_ADDR);
+ 			usb_pid = bcd2hex4(usb_pid);
+@@ -526,6 +543,32 @@ static int do_cvi_update(struct cmd_tbl *cmdtp, int flag, int argc,
+ 	if (ret == 0)
+ 		run_command("efusew FASTBOOT", 0);
+ #endif
++
++	// 烧录完后自动关机
++	{
++		mdelay(2 * 1000); // wait 2s to ensure write complete
++		// 走 poweroff 流程
++		mmio_write_32(0x050260c0, 0x1);
++		while (mmio_read_32(0x050260c0) != 0x1)
++			;
++		mmio_write_32(0x05025004, 0xab18);
++		mmio_write_32(0x03001098, 0); // 切pinmux为 PWR_BUTTON1
++		mmio_write_32(0x03001090, 0); // 切pinmux为 PWR_WAKEUP0
++
++		mmio_write_32(0x05027084, 0); // 锁定pinmux为 PWR_BUTTON1
++		mmio_write_32(0x0502708c, 0); // 锁定pinmux为 PWR_WAKEUP0，防止poweroff时被重置
++
++		mmio_write_32(0x050250ac, 0x2); // 设定 poweroff 时 rtc 不复位
++		mmio_write_32(0x050260d0, 0x3); // 不自动开机
++		mmio_write_32(0x050260bc, 0x1100); // RTC_EN_PWR_WAKEUP 设定唤醒源为 PWR_BUTTON1、PWR_WAKEUP0
++		// 设定触发模式，PWR_BUTTON1 为低电平触发，
++		// PWR_WAKEUP0 为上升沿触发（默认是高电平触发，会导致poweroff下去，立马又开机）
++		mmio_write_32(0x0502606c, 0x16);
++
++		while (1) {
++			mmio_write_32(0x05025008, 0x10001);
++		}
++	}
+ 	return ret;
+ }
+ 
+diff --git a/cmd/efuse.c b/cmd/efuse.c
+index 64dfd39158..e85007d6e0 100644
+--- a/cmd/efuse.c
++++ b/cmd/efuse.c
+@@ -512,9 +512,10 @@ CVI_S32 CVI_EFUSE_EnableFastBoot(void)
+ 		return ret;
+ 
+ 	// set sd dl button
+-	value = (0x1 << 22);
+-	value |= (0x1 << 24);
+-	value |= (0x1 << 26);
++	value = 0;
++	// value |= (0x1 << 22); // SD DL Disable; {bit22:23, 0b00/0b11: SD DL Enable; 0b01: Fastboot Mode; 0b10: Disable}
++	value |= (0x1 << 24); // USB DL Disable; {bit24:25, 0b00/0b11: USB DL Enable; 0b01: Fastboot Mode; 0b10: Disable}
++	value |= (0x1 << 26); // UART DL Disable; {bit26:27, 0b00/0b11: UART DL Enable; 0b01: Fastboot Mode; 0b10: Disable}
+ 
+ 	return _CVI_EFUSE_Write(CVI_EFUSE_SW_INFO, &value, sizeof(value));
+ }
+diff --git a/drivers/cvi_usb/utask/cv181x/usb_tty.c b/drivers/cvi_usb/utask/cv181x/usb_tty.c
+index e2ac3d0abf..8c87e025d4 100644
+--- a/drivers/cvi_usb/utask/cv181x/usb_tty.c
++++ b/drivers/cvi_usb/utask/cv181x/usb_tty.c
+@@ -1065,13 +1065,38 @@ static void bulkOutCmplMain(struct usb_ep *ep, struct usb_request *req)
+ 		run_command("efusew FASTBOOT", 0);
+ #endif
+ 		// software_root_reset(); // Mark_to_do
+-		mmio_setbits_32(TOP_BASE + 0x8, 0x4); // wdt reset enable
+-		mmio_write_32(WATCHDOG_BASE + 0x4,
+-			      0x20); // Set timeout range reigster
+-		mmio_write_32(WATCHDOG_BASE + 0xc,
+-			      0x76); // Counter restart register
+-		mmio_write_32(WATCHDOG_BASE,
+-			      0x13); // Response mode and enable WDT
++		// mmio_setbits_32(TOP_BASE + 0x8, 0x4); // wdt reset enable
++		// mmio_write_32(WATCHDOG_BASE + 0x4,
++		// 	      0x20); // Set timeout range reigster
++		// mmio_write_32(WATCHDOG_BASE + 0xc,
++		// 	      0x76); // Counter restart register
++		// mmio_write_32(WATCHDOG_BASE,
++		// 	      0x13); // Response mode and enable WDT
++
++		{
++			mdelay(2 * 1000); // wait 2s to ensure write complete
++			// 走 poweroff 流程
++			mmio_write_32(0x050260c0, 0x1);
++			while (mmio_read_32(0x050260c0) != 0x1)
++				;
++			mmio_write_32(0x05025004, 0xab18);
++			mmio_write_32(0x03001098, 0); // 切pinmux为 PWR_BUTTON1
++			mmio_write_32(0x03001090, 0); // 切pinmux为 PWR_WAKEUP0
++
++			mmio_write_32(0x05027084, 0); // 锁定pinmux为 PWR_BUTTON1
++			mmio_write_32(0x0502708c, 0); // 锁定pinmux为 PWR_WAKEUP0，防止poweroff时被重置
++
++			mmio_write_32(0x050250ac, 0x2); // 设定 poweroff 时 rtc 不复位
++			mmio_write_32(0x050260d0, 0x3); // 不自动开机
++			mmio_write_32(0x050260bc, 0x1100); // RTC_EN_PWR_WAKEUP 设定唤醒源为 PWR_BUTTON1、PWR_WAKEUP0
++			// 设定触发模式，PWR_BUTTON1 为低电平触发，
++			// PWR_WAKEUP0 为上升沿触发（默认是高电平触发，会导致poweroff下去，立马又开机）
++			mmio_write_32(0x0502606c, 0x16);
++
++			while (1) {
++				mmio_write_32(0x05025008, 0x10001);
++			}
++		}
+ 		break;
+ 
+ 	default:
+-- 
+2.25.1
+

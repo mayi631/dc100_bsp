@@ -1,0 +1,52 @@
+From 54169b08508812d705a33c58ba33de07d7698c22 Mon Sep 17 00:00:00 2001
+From: "song.yu" <song.yu@sophgo.com>
+Date: Mon, 27 Oct 2025 16:53:30 +0800
+Subject: [PATCH 1/2] feat: set backlight after show logo
+
+Change-Id: I96f150d430fdad319def01128b1c5f8c6eb5430a
+---
+ components/cvi_platform/media/src/media_logo.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/components/cvi_platform/media/src/media_logo.c b/components/cvi_platform/media/src/media_logo.c
+index f102c5e1..de31b135 100644
+--- a/components/cvi_platform/media/src/media_logo.c
++++ b/components/cvi_platform/media/src/media_logo.c
+@@ -2,6 +2,7 @@
+ #include <stdio.h>
+ #include <ulog/ulog.h>
+ #include <unistd.h>
++#include <drv/pwm.h>
+ 
+ #include "cvi_snd.h"
+ #include "cvi_sys.h"
+@@ -334,6 +335,7 @@ int CVI_Media_Vdec_Logo(void)
+     CVI_U32 s32ReadLen = 0;
+     int i = 0;
+     VO_VIDEO_LAYER_ATTR_S stLayerAttr = {0};
++    bool backlight_status = false;
+ 
+     s32Ret = CVI_VB_Init();
+     if (s32Ret != CVI_SUCCESS) {
+@@ -459,6 +461,18 @@ int CVI_Media_Vdec_Logo(void)
+             CVI_VB_Exit();
+             return s32Ret;
+         }
++        if (!backlight_status) {
++            backlight_status = true;
++            /* set backlight PWM_6 --> bank 1, channel 0 */
++            csi_pwm_t pwm;
++            int bank = 1, channel = 0;
++            uint32_t period_ns = 40000; /* 40us */
++            uint32_t duty_ns = 24000;    /* 24us, 60% */
++            csi_pwm_init(&pwm, bank); /* bank 1 */
++            csi_pwm_out_stop(&pwm, channel); /* channel 0 */
++            csi_pwm_out_config(&pwm, channel, period_ns, duty_ns, PWM_POLARITY_HIGH);
++            csi_pwm_out_start(&pwm, channel);
++        }
+         CVI_VDEC_ReleaseFrame(0, &pstFrameInfo);
+         _vdec_deinit(vdec_attr_logo);
+     }
+-- 
+2.25.1
+

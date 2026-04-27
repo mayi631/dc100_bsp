@@ -1,0 +1,116 @@
+From 2e15610a64dab929bab8196c8485891d05a05418 Mon Sep 17 00:00:00 2001
+From: "song.yu" <song.yu@sophgo.com>
+Date: Mon, 23 Mar 2026 18:03:48 +0800
+Subject: [PATCH] [feat](efuse): enable fastboot support in spl
+
+[description ]:NA
+[root   cause]:NA
+[JIRA      ID]:CV184XSDK-1149
+[chip project]:NA
+[side effects]:NA
+[Affected *.ko/*.so/*.a] :NA
+
+Change-Id: I83f38d36b79e1f9181a18f4f1d33a048e14bc983
+---
+ board/cvitek/cv180x/board.c | 5 +++++
+ board/cvitek/cv181x/board.c | 6 ++++++
+ board/cvitek/cv184x/board.c | 6 ++++++
+ cmd/Makefile                | 4 +++-
+ 4 files changed, 20 insertions(+), 1 deletion(-)
+
+diff --git a/board/cvitek/cv180x/board.c b/board/cvitek/cv180x/board.c
+index bfd1061b13..209aecd1f4 100644
+--- a/board/cvitek/cv180x/board.c
++++ b/board/cvitek/cv180x/board.c
+@@ -22,6 +22,7 @@
+ #include "cv180x_pinlist_swconfig.h"
+ #include <linux/delay.h>
+ #include <bootstage.h>
++#include <cvitek/cvi_efuse.h>
+ 
+ #if defined(__riscv)
+ #include <asm/csr.h>
+@@ -230,6 +231,10 @@ int board_init(void)
+ 	//pinmux_config(PINMUX_SPI2);
+ 	cvi_board_init();
+ 
++#if defined(CONFIG_SPL_BUILD) && defined(CONFIG_EFUSE_ENABLE_FASTBOOT)
++	CVI_EFUSE_EnableFastBoot();
++#endif
++
+ 	return 0;
+ }
+ 
+diff --git a/board/cvitek/cv181x/board.c b/board/cvitek/cv181x/board.c
+index 0b17a28788..a30ea0829b 100644
+--- a/board/cvitek/cv181x/board.c
++++ b/board/cvitek/cv181x/board.c
+@@ -22,6 +22,7 @@
+ #include "cv181x_pinlist_swconfig.h"
+ #include <linux/delay.h>
+ #include <bootstage.h>
++#include <cvitek/cvi_efuse.h>
+ 
+ #if defined(__riscv)
+ #include <asm/csr.h>
+@@ -244,6 +245,11 @@ int board_init(void)
+ */
+ 	pinmux_config(PINMUX_SDIO1);
+ 	cvi_board_init();
++
++#if defined(CONFIG_SPL_BUILD) && defined(CONFIG_EFUSE_ENABLE_FASTBOOT)
++	CVI_EFUSE_EnableFastBoot();
++#endif
++
+ 	return 0;
+ }
+ 
+diff --git a/board/cvitek/cv184x/board.c b/board/cvitek/cv184x/board.c
+index 116d02337e..84d41d989a 100644
+--- a/board/cvitek/cv184x/board.c
++++ b/board/cvitek/cv184x/board.c
+@@ -23,6 +23,7 @@
+ #include "cv184x_pinlist_swconfig.h"
+ #include <linux/delay.h>
+ #include <bootstage.h>
++#include <cvitek/cvi_efuse.h>
+ // #include <configs/cv184x-asic.h>
+ 
+ #if defined(__riscv)
+@@ -304,6 +305,11 @@ int board_init(void)
+ 	PINMUX_CONFIG(IIC3_SCL, IIC3_SCL);
+ 	PINMUX_CONFIG(IIC3_SDA, IIC3_SDA);
+ 	cvi_board_init();
++
++#if defined(CONFIG_SPL_BUILD) && defined(CONFIG_EFUSE_ENABLE_FASTBOOT)
++	CVI_EFUSE_EnableFastBoot();
++#endif
++
+ 	return 0;
+ }
+ 
+diff --git a/cmd/Makefile b/cmd/Makefile
+index 5c538dd938..76e896000e 100644
+--- a/cmd/Makefile
++++ b/cmd/Makefile
+@@ -204,7 +204,6 @@ obj-$(CONFIG_CMD_AVB) += avb.o
+ # Foundries.IO SCP03
+ obj-$(CONFIG_CMD_SCP03) += scp03.o
+ 
+-obj-y += efuse.o
+ obj-y += spacc.o
+ obj-$(CONFIG_ARM) += arm/
+ obj-$(CONFIG_RISCV) += riscv/
+@@ -214,6 +213,9 @@ obj-$(CONFIG_X86) += x86/
+ obj-$(CONFIG_ARCH_MVEBU) += mvebu/
+ endif # !CONFIG_SPL_BUILD
+ 
++# Build efuse.o for both normal build and SPL
++obj-y += efuse.o
++
+ obj-$(CONFIG_CMD_UBI) += ubi.o
+ obj-$(CONFIG_CMD_UBIFS) += ubifs.o
+ 
+-- 
+2.25.1
+

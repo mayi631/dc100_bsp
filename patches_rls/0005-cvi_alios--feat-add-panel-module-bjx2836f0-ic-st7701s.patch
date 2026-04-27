@@ -1,0 +1,145 @@
+From e3c352e7f387bc49a7b7fbdf931c1460b2e80b58 Mon Sep 17 00:00:00 2001
+From: "song.yu" <song.yu@sophgo.com>
+Date: Wed, 17 Dec 2025 18:54:56 +0800
+Subject: [PATCH 2/2] feat: add panel module bjx2836f0, ic:st7701s
+
+Change-Id: I076dad636351f5ef8158c46fe17e42b13cbfac01
+---
+ .../cvi_mmf_sdk/cvi_panel/dsi_bjx2836f0.h     | 104 ++++++++++++++++++
+ components/cvi_mmf_sdk/cvi_panel/dsi_panels.h |   9 ++
+ 2 files changed, 113 insertions(+)
+ create mode 100644 components/cvi_mmf_sdk/cvi_panel/dsi_bjx2836f0.h
+
+diff --git a/components/cvi_mmf_sdk/cvi_panel/dsi_bjx2836f0.h b/components/cvi_mmf_sdk/cvi_panel/dsi_bjx2836f0.h
+new file mode 100644
+index 00000000..4a32a844
+--- /dev/null
++++ b/components/cvi_mmf_sdk/cvi_panel/dsi_bjx2836f0.h
+@@ -0,0 +1,104 @@
++#ifndef _MIPI_TX_PARAM_BJX2836F0_H_
++#define _MIPI_TX_PARAM_BJX2836F0_H_
++
++#include <cvi_comm_mipi_tx.h>
++
++#define BJX2836F0_VACT	640
++#define BJX2836F0_VSA	8
++#define BJX2836F0_VBP	20
++#define BJX2836F0_VFP	20
++
++#define BJX2836F0_HACT	480
++#define BJX2836F0_HSA	10
++#define BJX2836F0_HBP	80
++#define BJX2836F0_HFP	80
++
++#define BJX2836F0_PIXEL_CLK(x) ((x##_VACT + x##_VSA + x##_VBP + x##_VFP) \
++	* (x##_HACT + x##_HSA + x##_HBP + x##_HFP) * 60 / 1000)
++
++struct combo_dev_cfg_s dev_cfg_bjx2836f0 = {
++	.devno = 0,
++	.lane_id = {MIPI_TX_LANE_CLK, MIPI_TX_LANE_0, MIPI_TX_LANE_1, -1, -1},
++	.lane_pn_swap = {false, false, false, false, false},
++	.output_mode = OUTPUT_MODE_DSI_VIDEO,
++	.video_mode = BURST_MODE,
++	.output_format = OUT_FORMAT_RGB_24_BIT,
++	.sync_info = {
++		.vid_hsa_pixels = BJX2836F0_HSA,
++		.vid_hbp_pixels = BJX2836F0_HBP,
++		.vid_hfp_pixels = BJX2836F0_HFP,
++		.vid_hline_pixels = BJX2836F0_HACT,
++		.vid_vsa_lines = BJX2836F0_VSA,
++		.vid_vbp_lines = BJX2836F0_VBP,
++		.vid_vfp_lines = BJX2836F0_VFP,
++		.vid_active_lines = BJX2836F0_VACT,
++		.vid_vsa_pos_polarity = true,
++		.vid_hsa_pos_polarity = false,
++	},
++	.pixel_clk = BJX2836F0_PIXEL_CLK(BJX2836F0),
++};
++
++struct hs_settle_s hs_timing_cfg_bjx2836f0 = { .prepare = 6, .zero = 32, .trail = 1 };
++
++struct dsc_instr dsi_init_cmds_bjx2836f0[] = {
++	{.delay = 0, .data_type = 0x29, .size = 6, .data = (CVI_U8[]){ 0xFF, 0x77, 0x01, 0x00, 0x00, 0x13 } },
++	{.delay = 0, .data_type = 0x15, .size = 2, .data = (CVI_U8[]){ 0xEF, 0x08 } },
++	{.delay = 0, .data_type = 0x29, .size = 6, .data = (CVI_U8[]){ 0xFF, 0x77, 0x01, 0x00, 0x00, 0x10 } },
++	{.delay = 0, .data_type = 0x29, .size = 3, .data = (CVI_U8[]){ 0xC0, 0x4F, 0x00 } },
++	{.delay = 0, .data_type = 0x29, .size = 3, .data = (CVI_U8[]){ 0xC1, 0x10, 0x02 } },
++	{.delay = 0, .data_type = 0x29, .size = 3, .data = (CVI_U8[]){ 0xC2, 0x37, 0x02 } },
++	{.delay = 0, .data_type = 0x15, .size = 2, .data = (CVI_U8[]){ 0xCC, 0x10 } },
++	{.delay = 0, .data_type = 0x29, .size = 17, .data = (CVI_U8[]){
++		0xB0, 0x00, 0x10, 0x17, 0x0D, 0x11, 0x06, 0x05, 0x08, 0x07, 0x1F,
++		0x04, 0x11, 0x0E, 0x29, 0x30, 0x1F } },
++	{.delay = 0, .data_type = 0x29, .size = 17, .data = (CVI_U8[]){
++		0xB1, 0x00, 0x0D, 0x14, 0x0E, 0x11, 0x06, 0x04, 0x08, 0x08, 0x20,
++		0x05, 0x13, 0x13, 0x26, 0x30, 0x1F } },
++	{.delay = 0, .data_type = 0x29, .size = 6, .data = (CVI_U8[]){ 0xFF, 0x77, 0x01, 0x00, 0x00, 0x11 } },
++	{.delay = 0, .data_type = 0x15, .size = 2, .data = (CVI_U8[]){ 0xB0, 0x71 } },
++	{.delay = 0, .data_type = 0x15, .size = 2, .data = (CVI_U8[]){ 0xB1, 0x82 } },
++	{.delay = 0, .data_type = 0x15, .size = 2, .data = (CVI_U8[]){ 0xB2, 0x82 } },
++	{.delay = 0, .data_type = 0x15, .size = 2, .data = (CVI_U8[]){ 0xB3, 0x80 } },
++	{.delay = 0, .data_type = 0x15, .size = 2, .data = (CVI_U8[]){ 0xB5, 0x42 } },
++	{.delay = 0, .data_type = 0x15, .size = 2, .data = (CVI_U8[]){ 0xB7, 0x85 } },
++	{.delay = 0, .data_type = 0x15, .size = 2, .data = (CVI_U8[]){ 0xB8, 0x20 } },
++	{.delay = 0, .data_type = 0x15, .size = 2, .data = (CVI_U8[]){ 0xC0, 0x09 } },
++	{.delay = 0, .data_type = 0x15, .size = 2, .data = (CVI_U8[]){ 0xC1, 0x78 } },
++	{.delay = 0, .data_type = 0x15, .size = 2, .data = (CVI_U8[]){ 0xC2, 0x78 } },
++	{.delay = 0, .data_type = 0x15, .size = 2, .data = (CVI_U8[]){ 0xD0, 0x88 } },
++	{.delay = 0, .data_type = 0x29, .size = 4, .data = (CVI_U8[]){ 0xE0, 0x00, 0x00, 0x02 } },
++	{.delay = 0, .data_type = 0x29, .size = 12, .data = (CVI_U8[]){
++		0xE1, 0x04, 0xA0, 0x06, 0xA0, 0x05, 0xA0, 0x07, 0xA0, 0x00, 0x44, 0x44 } },
++	{.delay = 0, .data_type = 0x29, .size = 13, .data = (CVI_U8[]){
++		0xE2, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 } },
++	{.delay = 0, .data_type = 0x29, .size = 5, .data = (CVI_U8[]){ 0xE3, 0x00, 0x00, 0x22, 0x22 } },
++	{.delay = 0, .data_type = 0x29, .size = 3, .data = (CVI_U8[]){ 0xE4, 0x44, 0x44 } },
++	{.delay = 0, .data_type = 0x29, .size = 17, .data = (CVI_U8[]){
++		0xE5, 0x0C, 0x90, 0xA0, 0xA0, 0x0E, 0x92, 0xA0, 0xA0,
++		0x08, 0x8C, 0xA0, 0xA0, 0x0A, 0x8E, 0xA0, 0xA0 } },
++	{.delay = 0, .data_type = 0x29, .size = 5, .data = (CVI_U8[]){ 0xE6, 0x00, 0x00, 0x22, 0x22 } },
++	{.delay = 0, .data_type = 0x29, .size = 3, .data = (CVI_U8[]){ 0xE7, 0x44, 0x44 } },
++	{.delay = 0, .data_type = 0x29, .size = 17, .data = (CVI_U8[]){
++		0xE8, 0x0D, 0x91, 0xA0, 0xA0, 0x0F, 0x93, 0xA0, 0xA0,
++		0x09, 0x8D, 0xA0, 0xA0, 0x0B, 0x8F, 0xA0, 0xA0 } },
++	{.delay = 0, .data_type = 0x29, .size = 8, .data = (CVI_U8[]){ 0xEB, 0x00, 0x00, 0xE4, 0xE4, 0x44, 0x00, 0x40 } },
++	{.delay = 0, .data_type = 0x29, .size = 17, .data = (CVI_U8[]){
++		0xED, 0xFF, 0xF5, 0x47, 0x6F, 0x0B, 0xA1, 0xAB, 0xFF,
++		0xFF, 0xBA, 0x1A, 0xB0, 0xF6, 0x74, 0x5F, 0xFF } },
++	{.delay = 0, .data_type = 0x29, .size = 7, .data = (CVI_U8[]){ 0xEF, 0x08, 0x08, 0x08, 0x40, 0x3F, 0x64 } },
++	{.delay = 0, .data_type = 0x29, .size = 6, .data = (CVI_U8[]){ 0xFF, 0x77, 0x01, 0x00, 0x00, 0x13 } },
++	{.delay = 0, .data_type = 0x29, .size = 3, .data = (CVI_U8[]){ 0xE6, 0x16, 0x7C } },
++	{.delay = 0, .data_type = 0x29, .size = 3, .data = (CVI_U8[]){ 0xE8, 0x00, 0x0E } },
++	{.delay = 0, .data_type = 0x29, .size = 6, .data = (CVI_U8[]){ 0xFF, 0x77, 0x01, 0x00, 0x00, 0x00 } },
++	{.delay = 120, .data_type = 0x05, .size = 1, .data = (CVI_U8[]){ 0x11 } },
++	{.delay = 0, .data_type = 0x29, .size = 6, .data = (CVI_U8[]){ 0xFF, 0x77, 0x01, 0x00, 0x00, 0x13 } },
++	{.delay = 10, .data_type = 0x29, .size = 3, .data = (CVI_U8[]){ 0xE8, 0x00, 0x0C } },
++	{.delay = 0, .data_type = 0x29, .size = 3, .data = (CVI_U8[]){ 0xE8, 0x00, 0x00 } },
++	{.delay = 0, .data_type = 0x29, .size = 6, .data = (CVI_U8[]){ 0xFF, 0x77, 0x01, 0x00, 0x00, 0x00 } },
++	{.delay = 0, .data_type = 0x05, .size = 1, .data = (CVI_U8[]){ 0x29 } },
++	{.delay = 0, .data_type = 0x15, .size = 2, .data = (CVI_U8[]){ 0x35, 0x00 } }
++};
++
++#else
++#error "MIPI_TX_PARAM multi-delcaration!!"
++#endif // _MIPI_TX_PARAM_BJX2836F0_H_
+diff --git a/components/cvi_mmf_sdk/cvi_panel/dsi_panels.h b/components/cvi_mmf_sdk/cvi_panel/dsi_panels.h
+index 06ce4ab1..2683ff7d 100644
+--- a/components/cvi_mmf_sdk/cvi_panel/dsi_panels.h
++++ b/components/cvi_mmf_sdk/cvi_panel/dsi_panels.h
+@@ -55,6 +55,15 @@ static struct panel_desc_s panel_desc = {
+ 	.dsi_init_cmds = dsi_init_cmds_st7703_640x480,
+ 	.dsi_init_cmds_size = ARRAY_SIZE(dsi_init_cmds_st7703_640x480)
+ };
++#elif CONFIG_PANEL_BJX2836F0
++#include "dsi_bjx2836f0.h"
++static struct panel_desc_s panel_desc = {
++	.panel_name         = "BJX2836F0",
++	.dev_cfg            = &dev_cfg_bjx2836f0,
++	.hs_timing_cfg      = &hs_timing_cfg_bjx2836f0,
++	.dsi_init_cmds      = dsi_init_cmds_bjx2836f0,
++	.dsi_init_cmds_size = ARRAY_SIZE(dsi_init_cmds_bjx2836f0)
++};
+ #elif CONFIG_PANEL_HX8394
+ #include "dsi_hx8394_evb.h"
+ static struct panel_desc_s panel_desc = {
+-- 
+2.25.1
+

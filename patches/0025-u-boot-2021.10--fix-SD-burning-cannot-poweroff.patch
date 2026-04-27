@@ -1,0 +1,93 @@
+From d18b53d211da4c0ae3db09606f305b1480e40b08 Mon Sep 17 00:00:00 2001
+From: "song.yu" <song.yu@sophgo.com>
+Date: Sat, 21 Mar 2026 17:52:57 +0800
+Subject: [PATCH] fix: SD burning cannot poweroff
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+修复电池供电SD卡烧录后异常重启
+
+问题现象： 仅电池供电时，SD卡烧录完后，
+	自动关机会立马又重启，重新进烧录流程了。
+
+问题原因：关机时，设置了唤醒源为 pwr_button1，低电平触发，
+	再没有插USB的时候，确实是低电平，就触发了唤醒流程。
+
+解决办法：该项目使用外部RTC，不需要设置唤醒源，移除掉。
+
+Change-Id: I667847f31ccf91ad9dddbc90e41f4b01845dee1d
+---
+ cmd/cvi_update.c                       | 19 +++----------------
+ drivers/cvi_usb/utask/cv181x/usb_tty.c | 19 +++----------------
+ 2 files changed, 6 insertions(+), 32 deletions(-)
+
+diff --git a/cmd/cvi_update.c b/cmd/cvi_update.c
+index f3dd22bd20..f3b532e5cb 100644
+--- a/cmd/cvi_update.c
++++ b/cmd/cvi_update.c
+@@ -548,25 +548,12 @@ static int do_cvi_update(struct cmd_tbl *cmdtp, int flag, int argc,
+ 	{
+ 		mdelay(2 * 1000); // wait 2s to ensure write complete
+ 		// 走 poweroff 流程
+-		mmio_write_32(0x050260c0, 0x1);
++		mmio_write_32(0x050260c0, 0x1); // 使能软件请求下电
+ 		while (mmio_read_32(0x050260c0) != 0x1)
+ 			;
+-		mmio_write_32(0x05025004, 0xab18);
+-		mmio_write_32(0x03001098, 0); // 切pinmux为 PWR_BUTTON1
+-		mmio_write_32(0x03001090, 0); // 切pinmux为 PWR_WAKEUP0
+-
+-		mmio_write_32(0x05027084, 0); // 锁定pinmux为 PWR_BUTTON1
+-		mmio_write_32(0x0502708c, 0); // 锁定pinmux为 PWR_WAKEUP0，防止poweroff时被重置
+-
+-		mmio_write_32(0x050250ac, 0x2); // 设定 poweroff 时 rtc 不复位
+-		mmio_write_32(0x050260d0, 0x3); // 不自动开机
+-		mmio_write_32(0x050260bc, 0x1100); // RTC_EN_PWR_WAKEUP 设定唤醒源为 PWR_BUTTON1、PWR_WAKEUP0
+-		// 设定触发模式，PWR_BUTTON1 为低电平触发，
+-		// PWR_WAKEUP0 为上升沿触发（默认是高电平触发，会导致poweroff下去，立马又开机）
+-		mmio_write_32(0x0502606c, 0x16);
+-
++		mmio_write_32(0x05025004, 0xab18); // 解锁对 RTC_CTRL0(0x05025008) 的读写
+ 		while (1) {
+-			mmio_write_32(0x05025008, 0x10001);
++			mmio_write_32(0x05025008, 0x10001); // 请求下电
+ 		}
+ 	}
+ 	return ret;
+diff --git a/drivers/cvi_usb/utask/cv181x/usb_tty.c b/drivers/cvi_usb/utask/cv181x/usb_tty.c
+index 8c87e025d4..68ee1898bf 100644
+--- a/drivers/cvi_usb/utask/cv181x/usb_tty.c
++++ b/drivers/cvi_usb/utask/cv181x/usb_tty.c
+@@ -1076,25 +1076,12 @@ static void bulkOutCmplMain(struct usb_ep *ep, struct usb_request *req)
+ 		{
+ 			mdelay(2 * 1000); // wait 2s to ensure write complete
+ 			// 走 poweroff 流程
+-			mmio_write_32(0x050260c0, 0x1);
++			mmio_write_32(0x050260c0, 0x1); // 使能软件请求下电
+ 			while (mmio_read_32(0x050260c0) != 0x1)
+ 				;
+-			mmio_write_32(0x05025004, 0xab18);
+-			mmio_write_32(0x03001098, 0); // 切pinmux为 PWR_BUTTON1
+-			mmio_write_32(0x03001090, 0); // 切pinmux为 PWR_WAKEUP0
+-
+-			mmio_write_32(0x05027084, 0); // 锁定pinmux为 PWR_BUTTON1
+-			mmio_write_32(0x0502708c, 0); // 锁定pinmux为 PWR_WAKEUP0，防止poweroff时被重置
+-
+-			mmio_write_32(0x050250ac, 0x2); // 设定 poweroff 时 rtc 不复位
+-			mmio_write_32(0x050260d0, 0x3); // 不自动开机
+-			mmio_write_32(0x050260bc, 0x1100); // RTC_EN_PWR_WAKEUP 设定唤醒源为 PWR_BUTTON1、PWR_WAKEUP0
+-			// 设定触发模式，PWR_BUTTON1 为低电平触发，
+-			// PWR_WAKEUP0 为上升沿触发（默认是高电平触发，会导致poweroff下去，立马又开机）
+-			mmio_write_32(0x0502606c, 0x16);
+-
++			mmio_write_32(0x05025004, 0xab18); // 解锁对 RTC_CTRL0(0x05025008) 的读写
+ 			while (1) {
+-				mmio_write_32(0x05025008, 0x10001);
++				mmio_write_32(0x05025008, 0x10001); // 请求下电
+ 			}
+ 		}
+ 		break;
+-- 
+2.25.1
+

@@ -1,0 +1,39 @@
+From e9c9e779cec7b3d953162108840d22c07d4dbd5b Mon Sep 17 00:00:00 2001
+From: "song.yu" <song.yu@sophgo.com>
+Date: Fri, 27 Feb 2026 15:37:07 +0800
+Subject: [PATCH] fix(logo): backlight adjust & show logo slower
+
+Change-Id: Ie921c2a4217226d739277bc76031d9ad22dead9b
+---
+ components/cvi_platform/media/src/media_logo.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/components/cvi_platform/media/src/media_logo.c b/components/cvi_platform/media/src/media_logo.c
+index de31b135..3be513d6 100644
+--- a/components/cvi_platform/media/src/media_logo.c
++++ b/components/cvi_platform/media/src/media_logo.c
+@@ -452,7 +452,7 @@ int CVI_Media_Vdec_Logo(void)
+             return s32Ret;
+         }
+ 
+-        usleep(80*1000);
++        usleep(100*1000);
+         s32Ret = CVI_VO_SendLogoFromIon(0, 0, &pstFrameInfo, 1000);
+         if (s32Ret != CVI_SUCCESS) {
+             //goto RETRY_GET_FRAME;
+@@ -467,10 +467,10 @@ int CVI_Media_Vdec_Logo(void)
+             csi_pwm_t pwm;
+             int bank = 1, channel = 0;
+             uint32_t period_ns = 40000; /* 40us */
+-            uint32_t duty_ns = 24000;    /* 24us, 60% */
++            uint32_t duty_ns = 37647;    /* 37.6us, 对应 240/255 */
+             csi_pwm_init(&pwm, bank); /* bank 1 */
+             csi_pwm_out_stop(&pwm, channel); /* channel 0 */
+-            csi_pwm_out_config(&pwm, channel, period_ns, duty_ns, PWM_POLARITY_HIGH);
++            csi_pwm_out_config(&pwm, channel, period_ns, duty_ns, PWM_POLARITY_LOW);
+             csi_pwm_out_start(&pwm, channel);
+         }
+         CVI_VDEC_ReleaseFrame(0, &pstFrameInfo);
+-- 
+2.25.1
+

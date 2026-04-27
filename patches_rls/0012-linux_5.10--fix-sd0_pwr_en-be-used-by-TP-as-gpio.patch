@@ -1,0 +1,33 @@
+From cfa1b0f30b4d2f3bbed25eaca7c2eda507cbffab Mon Sep 17 00:00:00 2001
+From: "song.yu" <song.yu@sophgo.com>
+Date: Wed, 13 Aug 2025 11:51:39 +0800
+Subject: [PATCH 1/2] fix: sd0_pwr_en be used by TP as gpio
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+注释掉这里切换pinmux的逻辑，因为在项目中是常供电，这个引脚
+是作为TP的中断引脚，如果不注释掉，插拔SD卡会自动切换pinmux，
+导致TP收不到中断，TP失灵
+
+Change-Id: Ia543b0d432fe4f447b01d16b2f47d5dc9fef82d2
+---
+ drivers/mmc/host/cvitek/sdhci-cv184x.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/mmc/host/cvitek/sdhci-cv184x.c b/drivers/mmc/host/cvitek/sdhci-cv184x.c
+index 58e8948ff..8e5b9f760 100644
+--- a/drivers/mmc/host/cvitek/sdhci-cv184x.c
++++ b/drivers/mmc/host/cvitek/sdhci-cv184x.c
+@@ -320,7 +320,7 @@ static void sdhci_cv184x_sd_setup_pad(struct sdhci_host *host, bool bunplug)
+ 	else
+ 		writeb(0x0, cvi_host->pinmuxbase + 0x34);
+ 
+-	writeb(0x0, cvi_host->pinmuxbase + 0x38);
++	// writeb(0x0, cvi_host->pinmuxbase + 0x38);
+ 	writeb(val, cvi_host->pinmuxbase + 0x1C);
+ 	writeb(val, cvi_host->pinmuxbase + 0x20);
+ 	writeb(val, cvi_host->pinmuxbase + 0x24);
+-- 
+2.25.1
+
