@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+    <remote name="origin" fetch="ssh://10.132.3.76:29418/" review="ssh://10.132.3.76:29418/"/>
+    <default revision="v6.3.2" remote="origin" sync-j="4"/>
+
+    <project name="cvitek/build" path="build"/>
+    <project name="cvitek/cnpy" path="cnpy" revision="tpu"/>
+    <project name="cvitek/cvi_alios" path="cvi_alios"/>
+    <project name="cvitek/cvi_mpi" path="cvi_mpi"/>
+    <project name="cvitek/cvi_rtsp" path="cvi_rtsp"/>
+    <project name="cvitek/fsbl" path="fsbl"/>
+    <project name="cvitek/isp_tuning" path="isp_tuning"/>
+    <project name="cvitek/isp-tool-daemon" path="isp-tool-daemon"/>
+    <project name="cvitek/isp" path="cvi_mpi/modules/isp" sync-s="true"/>
+    <project name="cvitek/ive" path="ive"/>
+    <project name="cvitek/linux_5.10" path="linux_5.10"/>
+    <project name="cvitek/mediapipe" path="mediapipe" revision="Mars3_dev"/>
+    <project name="cvitek/osal" path="osal"/>
+    <project name="cvitek/osdrv" path="osdrv"/>
+    <project name="cvitek/oss"  path="oss" sync-s="true" revision="master"/>
+    <project name="cvitek/ramdisk" path="ramdisk"/>
+    <project name="cvitek/SensorSupportList" path="build/media/SensorSupportList" revision="master"/>
+    <project name="cvitek/tdl_sdk" path="tdl_sdk" revision="golden"/>
+    <project name="cvitek/tracer" path="ive/3rdparty/tracer" revision="master"/>
+    <project name="cvitek/u-boot-2021.10" path="u-boot-2021.10"/>
+    <project name="libsophon" path="libsophon" sync-s="true"/>
+    <project name="oss/rt-thread" path="rt-thread"/>
+</manifest>

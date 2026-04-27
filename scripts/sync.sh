@@ -72,7 +72,7 @@ sync_directory() {
         source_path="$target_path"
         target_path="$temp"
     else
-        echo -e "${BLUE}🔄 正在同步 $description 到 $target_path...${NC}"
+        echo -e "${BLUE}🔄 正在同步 $description($source_path) 到 $target_path...${NC}"
     fi
 
     # 检查源目录是否存在

@@ -1,0 +1,525 @@
+From ca98c37dfc2e7db0cedb09cc49dea403593cafc5 Mon Sep 17 00:00:00 2001
+From: "xiaole.chen" <xiaole.chen@sophgo.com>
+Date: Tue, 27 Jan 2026 15:11:24 +0800
+Subject: [PATCH] feat:[vi] support dynamic online/offline scaler mode
+ switching [description ] Support dynamic switching between:                -
+ VI offline + VPSS offline                - VI offline + VPSS online 	      
+ include Master[158094] [root   cause]:NA [JIRA      ID]:CV184XSDK-780 [chip
+ project]:NA [side effects]:cv184x_vi.ko
+
+Change-Id: I7c47c6d5557f36fa4f454c7a9c32165278739539
+---
+ interdrv/vi/chip/cv184x/inc/vi_ip_comm.h |   1 +
+ interdrv/vi/chip/cv184x/vi_drv.c         |   5 +
+ interdrv/vi/driver/vi.c                  | 298 ++++++++++++++---------
+ interdrv/vi/driver/vi_defines.h          |   1 +
+ interdrv/vi/driver/vi_sdk_layer.c        |  44 +++-
+ 5 files changed, 222 insertions(+), 127 deletions(-)
+
+diff --git a/interdrv/vi/chip/cv184x/inc/vi_ip_comm.h b/interdrv/vi/chip/cv184x/inc/vi_ip_comm.h
+index e19e7061..14afbc3e 100644
+--- a/interdrv/vi/chip/cv184x/inc/vi_ip_comm.h
++++ b/interdrv/vi/chip/cv184x/inc/vi_ip_comm.h
+@@ -576,5 +576,6 @@ struct isp_ctx {
+ u32 _is_fe_post_offline(struct isp_ctx *ctx);
+ u32 _is_fe_post_slice(struct isp_ctx *ctx);
+ u32 _is_all_online(struct isp_ctx *ctx);
++u32 _is_post_sc_online(struct isp_ctx *ctx, uint8_t pipe);
+ 
+ #endif
+diff --git a/interdrv/vi/chip/cv184x/vi_drv.c b/interdrv/vi/chip/cv184x/vi_drv.c
+index b3f5bd59..78814071 100644
+--- a/interdrv/vi/chip/cv184x/vi_drv.c
++++ b/interdrv/vi/chip/cv184x/vi_drv.c
+@@ -99,6 +99,11 @@ u32 _is_all_online(struct isp_ctx *ctx)
+ 	return !ctx->is_offline_postraw && !ctx->is_slice_buf_on; //fe->post
+ }
+ 
++u32 _is_post_sc_online(struct isp_ctx *ctx, uint8_t pipe) //post->sc
++{
++	return !ctx->isp_pipe_cfg[pipe].is_offline_scaler;
++}
++
+ /****************************************************************************
+  *  inner Interfaces
+  ****************************************************************************/
+diff --git a/interdrv/vi/driver/vi.c b/interdrv/vi/driver/vi.c
+index f3031181..61ef0f11 100755
+--- a/interdrv/vi/driver/vi.c
++++ b/interdrv/vi/driver/vi.c
+@@ -285,19 +285,15 @@ static inline bool is_bypass_frame(const struct vi_dev *vdev, const u8 pipe)
+ static void _vi_update_yuvtop_out_cfg(struct vi_dev *vdev, uint8_t pipe)
+ {
+ 	struct isp_ctx *ctx = &vdev->ctx;
+-	bool is_bypass = false;
+-
+-	is_bypass = is_bypass_frame(vdev, pipe);
++	bool is_bypass = is_bypass_frame(vdev, pipe);
++	bool is_offline_scaler = ctx->isp_pipe_cfg[pipe].is_offline_scaler;
++	bool dma_enable = is_bypass || is_offline_scaler;
+ 
+-	//for online sc
+-	if (!ctx->isp_pipe_cfg[pipe].is_offline_scaler) {
+-		ispblk_yuvtop_out_config(ctx, !is_bypass);
+-	}
++	// for online scaler: enable output when not bypassing, for offline scaler: always disable
++	ispblk_yuvtop_out_config(ctx, !is_offline_scaler && !is_bypass);
+ 
+-	ispblk_dma_enable(ctx, ISP_BLK_ID_DMA_CTL_YUV_CROP_Y,
+-				is_bypass || ctx->isp_pipe_cfg[pipe].is_offline_scaler, is_bypass);
+-	ispblk_dma_enable(ctx, ISP_BLK_ID_DMA_CTL_YUV_CROP_C,
+-				is_bypass || ctx->isp_pipe_cfg[pipe].is_offline_scaler, is_bypass);
++	ispblk_dma_enable(ctx, ISP_BLK_ID_DMA_CTL_YUV_CROP_Y, dma_enable, is_bypass);
++	ispblk_dma_enable(ctx, ISP_BLK_ID_DMA_CTL_YUV_CROP_C, dma_enable, is_bypass);
+ 
+ 	vi_pr(VI_DBG, "pipe(%d) postraw_frm_num=%d, bypass_num=%d, is_bypass=%d\n",
+ 		pipe, vdev->postraw_frame_number[pipe], ctx->isp_pipe_cfg[pipe].bypass_num, is_bypass);
+@@ -2452,7 +2448,7 @@ static void _vi_timeout_chk(struct vi_dev *vdev)
+ 	}
+ }
+ 
+-static void _vi_update_chn_real_frame_rate(vi_chn_status_s *vi_chn_status)
++static void _vi_update_chn_real_frame_rate(vi_chn_status_s *vi_chn_status, uint32_t sequence)
+ {
+ 	u64 duration, cur_time;
+ 	osal_timeval osal_tv;
+@@ -2467,6 +2463,10 @@ static void _vi_update_chn_real_frame_rate(vi_chn_status_s *vi_chn_status)
+ 		vi_chn_status->prev_time = cur_time;
+ 	}
+ 
++	vi_chn_status->int_cnt++;
++	vi_chn_status->frame_num++;
++	vi_chn_status->recv_pic = sequence;
++
+ 	vi_pr(VI_DBG, "FrameRate=%d\n", vi_chn_status->frame_rate);
+ }
+ 
+@@ -2529,6 +2529,75 @@ static int vi_ldc_handle_op(struct vi_dev *vdev, mmf_chn_s *mmf_chn, vb_blk blk)
+ 	return -1;
+ }
+ 
++static void vi_handle_online_frm_done(struct vi_dev *vdev, struct _vi_buffer *b)
++{
++	uint8_t pipe = b->pipe_id;
++	uint8_t chn = b->chn_id;
++	struct isp_buf_q *qbuf_q = &vdev->qbuf_q[pipe][chn];
++
++	if (sop_isp_rdy_buf_empty(qbuf_q))
++		return;
++
++	while (!sop_isp_rdy_buf_empty(qbuf_q)) {
++		//clean ready buffer
++		sop_isp_rdy_buf_remove(qbuf_q);
++	}
++
++	base_mod_jobs_clear(&vdev->vi_jobs[pipe][chn]);
++}
++
++static void vi_handle_offline_frm_done(struct vi_dev *vdev, struct _vi_buffer *b)
++{
++	struct vb_s *vb = NULL;
++	struct isp_ctx *ctx = &vdev->ctx;
++	uint8_t pipe = b->pipe_id;
++	uint8_t chn = b->chn_id;
++	vb_blk blk = VB_INVALID_HANDLE;
++	struct vi_ctx *vi_ctx = (struct vi_ctx *)(vdev->shared_mem);
++	mmf_chn_s mmf_chn = {.mod_id = ID_VI, .dev_id = pipe, .chn_id = chn};
++
++	if (ctx->isp_pipe_cfg[pipe].bypass_num >= b->sequence) {
++		//Release buffer if bypass_frm is not zero
++		vi_pr(VI_DBG, "skip vb\n");
++		return;
++	}
++
++	blk = vdev->vi_dqbuf(mmf_chn, vdev);
++	if (blk == VB_INVALID_HANDLE) {
++		vi_pr(VI_ERR, "pipe(%d) chn(%d) can't get vb-blk.\n", pipe, chn);
++		return;
++	}
++
++	vb = (struct vb_s *)(uintptr_t)blk;
++
++	vb->buf.dev_num = pipe;
++	vb->buf.frm_num = b->sequence;
++	vb->buf.pts = (uint64_t)b->tv.tv_sec * 1000000 +  b->tv.tv_usec;
++
++	vi_pr(VI_DBG, "dqbuf(%#llx) cnt(%d) pipe=%d chn=%d, skip_frm(%d) frm_num=%d\n",
++			(unsigned long long)vb->phy_addr, osal_atomic_read(&vb->usr_cnt), pipe,
++			chn, ctx->isp_pipe_cfg[pipe].bypass_num, b->sequence);
++
++	if (vi_ldc_handle_op(vdev, &mmf_chn, blk) != 0) {
++		vb_done_handler(mmf_chn, CHN_TYPE_OUT, &vdev->vi_jobs[pipe][chn], blk);
++	}
++
++	if (!(vi_ctx->is_chn_enable[pipe][chn]))
++		return;
++
++	if (vdev->vi_qbuf(mmf_chn, vdev) != 0) {
++		vb_pool poolid = VB_INVALID_POOLID;
++
++		if (vi_ctx->chn_attr[pipe][chn].bind_vb_pool == VB_INVALID_POOLID)
++			poolid = find_vb_pool(vi_ctx->blk_size[pipe][chn]);
++		else
++			poolid = vi_ctx->chn_attr[pipe][chn].bind_vb_pool;
++
++		if (poolid != VB_INVALID_POOLID)
++			vb_acquire_block(vdev->vi_qbuf, mmf_chn, poolid, vdev);
++	}
++}
++
+ static int _vi_event_handler_thread(void *arg)
+ {
+ 	struct vi_dev *vdev = (struct vi_dev *)arg;
+@@ -2536,17 +2605,11 @@ static int _vi_event_handler_thread(void *arg)
+ 	struct vi_ctx *vi_ctx = (struct vi_ctx *)(vdev->shared_mem);
+ 	int ret = 0;
+ 	enum E_VI_TH th_id = E_VI_TH_EVENT_HANDLER;
+-	mmf_chn_s chn = {.mod_id = ID_VI, .dev_id = 0, .chn_id = 0};
+-	int pipe_id, chn_id;
+-	osal_timeval time[2];
+-	u32 sum = 0, duration, duration_max = 0, duration_min = 1000 * 1000;
+-	u8 count = 0;
++	int pipe, chn;
++	struct _vi_buffer b;
+ 	uint32_t flag = 0;
+ 
+ 	while (!osal_atomic_read(&vdev->vi_th[th_id].exit_flag)) {
+-		_vi_update_chn_real_frame_rate(&vi_ctx->chn_status[chn.dev_id][chn.chn_id]);
+-		osal_gettimeofday(&time[0]);
+-
+ 		ret = osal_wait_timeout_uninterruptible(&vdev->vi_th[th_id].wq,
+ 					vi_event_thread_wait_cond_func,
+ 					vdev,
+@@ -2568,79 +2631,22 @@ static int _vi_event_handler_thread(void *arg)
+ 			}
+ 			continue;
+ 		} else {
+-			struct _vi_buffer b;
+-			vb_blk blk = 0;
+-			struct vb_s *vb = NULL;
+-
+-			//DQbuf from list.
+ 			if (vi_dqbuf(&vdev->dqbuf_q, &b)) {
+ 				vi_pr(VI_DBG, "illegal wakeup raw_num[%d]\n", flag);
+ 				continue;
+ 			}
+ 
+-			chn.dev_id = pipe_id = b.pipe_id;
+-			chn.chn_id = chn_id = b.chn_id;
+-			ret = vb_dqbuf(chn, &vdev->vi_jobs[pipe_id][chn_id], &blk);
+-			if (ret) {
+-				if (blk == VB_INVALID_HANDLE)
+-					vi_pr(VI_ERR, "pipe(%d) chn(%d) can't get vb-blk.\n", pipe_id, chn_id);
+-				continue;
+-			}
+-
+-			vb = (struct vb_s *)(uintptr_t)blk;
+-
+-			vb->buf.dev_num = b.pipe_id;
+-			vb->buf.frm_num = b.sequence;
+-			vb->buf.pts = (uint64_t)b.tv.tv_sec * 1000000 + b.tv.tv_usec;
+-
+-			vi_ctx->chn_status[pipe_id][chn_id].int_cnt++;
+-			vi_ctx->chn_status[pipe_id][chn_id].frame_num++;
+-			vi_ctx->chn_status[pipe_id][chn_id].recv_pic = b.sequence;
+-
+-			vi_pr(VI_DBG, "dqbuf(%#llx) cnt(%d) pipe_id=%d chn_id=%d, skip_frm(%d) frm_num=%d\n",
+-					(unsigned long long)vb->phy_addr, osal_atomic_read(&vb->usr_cnt), pipe_id,
+-					chn_id, vi_ctx->bypass_frm[pipe_id], b.sequence);
+-
+-			if (ctx->isp_pipe_cfg[pipe_id].bypass_num >= b.sequence) {
+-				//Release buffer if bypass_frm is not zero
+-				vi_pr(VI_DBG, "skip vb\n");
+-				vb_release_block(blk);
+-				goto QBUF;
+-			}
+-
+-			if (vi_ldc_handle_op(vdev, &chn, blk) != 0) {
+-				vb_done_handler(chn, CHN_TYPE_OUT, &vdev->vi_jobs[pipe_id][chn_id], blk);
+-			}
+-
+-QBUF:
+-			if (!(vi_ctx->is_chn_enable[pipe_id][chn_id]))
+-				continue;
+-
+-			if (vdev->vi_qbuf(chn, vdev) != 0) {
+-				vb_pool poolid = VB_INVALID_POOLID;
++			pipe = b.pipe_id;
++			chn = b.chn_id;
+ 
+-				if (vi_ctx->chn_attr[pipe_id][chn_id].bind_vb_pool == VB_INVALID_POOLID)
+-					poolid = find_vb_pool(vi_ctx->blk_size[pipe_id][chn_id]);
+-				else
+-					poolid = vi_ctx->chn_attr[pipe_id][chn_id].bind_vb_pool;
++			_vi_update_chn_real_frame_rate(&vi_ctx->chn_status[pipe][chn], b.sequence);
+ 
+-				if (poolid != VB_INVALID_POOLID)
+-					vb_acquire_block(vdev->vi_qbuf, chn, poolid, vdev);
++			if (!_is_post_sc_online(ctx, pipe)) {
++				vi_handle_offline_frm_done(vdev, &b);
++			} else {
++				vi_handle_online_frm_done(vdev, &b);
+ 			}
+ 		}
+-
+-		osal_gettimeofday(&time[1]);
+-		duration = get_diff_in_us(time[0], time[1]);
+-		duration_max = MAX(duration, duration_max);
+-		duration_min = MIN(duration, duration_min);
+-		sum += duration;
+-		if (++count == 100) {
+-			vi_pr(VI_DBG, "VI duration(ms): average(%d), max(%d) min(%d)\n"
+-				, sum / count / 1000, duration_max / 1000, duration_min / 1000);
+-			count = 0;
+-			sum = duration_max = 0;
+-			duration_min = 1000 * 1000;
+-		}
+ 	}
+ 
+ 	vi_pr(VI_INFO, "%s exit\n", vdev->vi_th[th_id].th_name);
+@@ -4057,16 +4063,17 @@ static void _isp_postraw_done_handler(struct vi_dev *vdev)
+ 		vi_event_queue(vdev, VI_EVENT_POST0_EOF + pipe, vdev->postraw_frame_number[pipe]);
+ 	}
+ 
+-	if (ctx->isp_pipe_cfg[pipe].is_offline_scaler && ctx->isp_pipe_cfg[pipe].chn_enable) {
+-		//bypass mode
+-		if (vdev->postraw_frame_number[pipe] <= ctx->isp_pipe_cfg[pipe].bypass_num)
+-			return;
+-
+-		sop_isp_rdy_buf_remove(&vdev->qbuf_q[pipe][chn_num]);
+-		sop_isp_dqbuf_list(vdev, vdev->postraw_frame_number[pipe],
+-				   pipe, chn_num,
+-				   ctx->isp_pipe_cfg[pipe].tv);
++	if (ctx->isp_pipe_cfg[pipe].chn_enable) {
++		sop_isp_dqbuf_list(vdev, vdev->postraw_frame_number[pipe], pipe, chn_num, ctx->isp_pipe_cfg[pipe].tv);
+ 		_vi_wake_up_event_th(vdev, pipe);
++
++		if (ctx->isp_pipe_cfg[pipe].is_offline_scaler) {
++			//bypass mode
++			if (vdev->postraw_frame_number[pipe] <= ctx->isp_pipe_cfg[pipe].bypass_num)
++				return;
++
++			sop_isp_rdy_buf_remove(&vdev->qbuf_q[pipe][chn_num]);
++		}
+ 	}
+ }
+ 
+@@ -4343,6 +4350,87 @@ int vi_update_ldc_mesh(struct vi_dev *vdev,
+ 	return 0;
+ }
+ 
++static int vi_queue_setup(struct vi_dev *vdev, uint8_t pipe)
++{
++	int ret = 0, i = 0, j = 0;
++	struct vi_ctx *vi_ctx = (struct vi_ctx *)(vdev->shared_mem);
++	mmf_chn_s mmf_chn = {.mod_id = ID_VI, .dev_id = pipe, .chn_id = VI_CHN0};
++	int num_buffers = vi_ctx->chn_attr[pipe][VI_CHN0].single_vb ? 1 : VI_CHN_0_BUF;
++	vb_blk blk = VB_INVALID_HANDLE;
++
++	for (i = 0; i < num_buffers; i++) {
++		ret = vdev->vi_qbuf(mmf_chn, vdev);
++		if (ret) {
++			vi_pr(VI_ERR, "Pipe(%d) Chn(%d) qbuf failed when switch post sc mode\n", pipe, VI_CHN0);
++			goto release_buf;
++		}
++	}
++
++	return ret;
++
++release_buf:
++	for (j = 0; j < i; j++) {
++		blk = vdev->vi_dqbuf(mmf_chn, vdev);
++		if (blk != VB_INVALID_HANDLE) {
++			vb_release_block(blk);
++			sop_isp_rdy_buf_remove(&vdev->qbuf_q[pipe][VI_CHN0]);
++		}
++	}
++
++	return ret;
++}
++
++static int _vi_cb_set_vivpss_mode(struct vi_dev *vdev, vi_vpss_mode_s *vi_vpss_mode)
++{
++	int ret = 0;
++	uint8_t pipe = 0;
++	bool vi_online = false;
++	bool vi_slice = false;
++	bool vi_online2sc = false;
++	struct isp_ctx *ctx = &vdev->ctx;
++	struct vi_ctx *vi_ctx = (struct vi_ctx *)(vdev->shared_mem);
++
++	vi_online = (vi_vpss_mode->mode[0] == VI_ONLINE_VPSS_ONLINE) ||
++			(vi_vpss_mode->mode[0] == VI_ONLINE_VPSS_OFFLINE);
++
++	vi_slice = (vi_vpss_mode->mode[0] == VI_SLICE_VPSS_ONLINE) ||
++			(vi_vpss_mode->mode[0] == VI_SLICE_VPSS_OFFLINE);
++
++	//only first setting need set vi mode, others just update online/offline postraw flag
++	if (!osal_atomic_read(&vdev->stream.isp_init)) {
++		vi_ctx->mode = *vi_vpss_mode;
++		ctx->is_offline_postraw = !vi_online;
++		ctx->is_slice_buf_on = vi_slice;
++
++		for (pipe = 0; pipe < VI_MAX_PIPE_NUM; pipe++)
++			postraw_update_sw_param(vdev, pipe);
++
++		return ret;
++	}
++
++	//check whether need to switch post sc mode
++	//if onlineSc to offlineSc, need to setup qbuf, otherwise will release buf in vi_event_handler
++	for (pipe = 0; pipe < VI_MAX_PIPE_NUM; pipe++) {
++		if (!ctx->isp_pipe_cfg[pipe].is_enable)
++			continue;
++		vi_online2sc = (vi_vpss_mode->mode[pipe] == VI_OFFLINE_VPSS_ONLINE) ||
++				(vi_vpss_mode->mode[pipe] == VI_SLICE_VPSS_ONLINE)
++				|| (vi_vpss_mode->mode[pipe] == VI_ONLINE_VPSS_ONLINE);
++		if (_is_post_sc_online(ctx, pipe) && !vi_online2sc) { //onlineSc to offlineSc
++			ret = vi_queue_setup(vdev, pipe);
++			if (ret) {
++				vi_pr(VI_ERR, "Pipe(%d) setup qbuf failed when switch post sc mode\n", pipe);
++				return ret;
++			}
++		}
++		vi_ctx->mode = *vi_vpss_mode;
++	}
++
++	vi_pr(VI_DBG, "set vi_online:%d, is_offline_postraw=%d\n", vi_online, ctx->is_offline_postraw);
++
++	return ret;
++}
++
+ int vi_cb(void *dev, cb_modules_id caller, u32 cmd, void *arg)
+ {
+ 	struct vi_dev *vdev = (struct vi_dev *)dev;
+@@ -4373,32 +4461,10 @@ int vi_cb(void *dev, cb_modules_id caller, u32 cmd, void *arg)
+ 	case VI_CB_SET_VIVPSSMODE:
+ 	{
+ 		vi_vpss_mode_s vi_vpss_mode;
+-		u8 vi_online = 0;
+-		u8 vi_slice = 0;
+-		u8 pipe = 0;
+ 
+ 		osal_memcpy(&vi_vpss_mode, arg, sizeof(vi_vpss_mode_s));
+ 
+-		vi_online = (vi_vpss_mode.mode[0] == VI_ONLINE_VPSS_ONLINE) ||
+-			    (vi_vpss_mode.mode[0] == VI_ONLINE_VPSS_OFFLINE);
+-
+-		vi_slice = (vi_vpss_mode.mode[0] == VI_SLICE_VPSS_ONLINE) ||
+-			    (vi_vpss_mode.mode[0] == VI_SLICE_VPSS_OFFLINE);
+-
+-		vi_ctx->mode = vi_vpss_mode;
+-		rc = 0;
+-
+-		if (osal_atomic_read(&vi_ctx->total_dev_num))
+-			break;
+-
+-		ctx->is_offline_postraw = !vi_online;
+-		ctx->is_slice_buf_on = vi_slice;
+-
+-		for (pipe = 0; pipe < VI_MAX_PIPE_NUM; pipe++)
+-			postraw_update_sw_param(vdev, pipe);
+-
+-		vi_pr(VI_DBG, "Caller_Mod(%d) set vi_online:%d, is_offline_postraw=%d\n",
+-				caller, vi_online, ctx->is_offline_postraw);
++		rc = _vi_cb_set_vivpss_mode(vdev, &vi_vpss_mode);
+ 
+ 		break;
+ 	}
+diff --git a/interdrv/vi/driver/vi_defines.h b/interdrv/vi/driver/vi_defines.h
+index 92d00ca7..12c7a062 100644
+--- a/interdrv/vi/driver/vi_defines.h
++++ b/interdrv/vi/driver/vi_defines.h
+@@ -184,6 +184,7 @@ struct vi_dev {
+ 	struct isp_buf_q		dqbuf_q;
+ 	struct isp_sof_raw_num_q	pre_raw_num_q;
+ 
++	vb_blk				(*vi_dqbuf)(mmf_chn_s mmf_chn, void *data);
+ 	int				(*vi_qbuf)(mmf_chn_s mmf_chn, void *data);
+ 	u32				pre_fe_sof_cnt[ISP_PRERAW_MAX][ISP_FE_CHN_MAX];
+ 	u32				pre_fe_frm_num[ISP_PRERAW_MAX][ISP_FE_CHN_MAX];
+diff --git a/interdrv/vi/driver/vi_sdk_layer.c b/interdrv/vi/driver/vi_sdk_layer.c
+index 2a9ba843..d9960bf3 100644
+--- a/interdrv/vi/driver/vi_sdk_layer.c
++++ b/interdrv/vi/driver/vi_sdk_layer.c
+@@ -191,6 +191,28 @@ static int vi_set_dev_bind_info(struct vi_dev *vdev, int dev, vi_dev_bind_pipe_s
+ 	return 0;
+ }
+ 
++vb_blk vi_sdk_dqbuf(mmf_chn_s mmf_chn, void *data)
++{
++	struct vi_dev *vdev = (struct vi_dev *)data;
++	int pipe = mmf_chn.dev_id;
++	int chn = mmf_chn.chn_id;
++	int ret = 0;
++	vb_blk blk = VB_INVALID_HANDLE;
++
++	if (!vdev) {
++		vi_pr(VI_ERR, "null point\n");
++		return ERR_VI_INVALID_NULL_PTR;
++	}
++
++	ret = vb_dqbuf(mmf_chn, &vdev->vi_jobs[pipe][chn], &blk);
++	if (ret != 0) {
++		vi_pr(VI_DBG, "Can't acquire VB BLK for VI\n");
++		return ERR_VI_NOMEM;
++	}
++
++	return blk;
++}
++
+ int vi_sdk_qbuf(mmf_chn_s mmf_chn, void *data)
+ {
+ 	struct vi_dev *vdev = (struct vi_dev *)data;
+@@ -1060,16 +1082,16 @@ int vi_enable_chn(struct vi_dev *vdev, int pipe, int chn)
+ 	struct isp_ctx *ctx = &vdev->ctx;
+ 	struct vi_ctx *vi_ctx = (struct vi_ctx *)(vdev->shared_mem);
+ 	u8 num_buffers = 0;
+-	u8 create_thread = false;
+ 	mmf_chn_s mmf_chn = {.mod_id = ID_VI, .dev_id = pipe, .chn_id = chn};
++	vi_vpss_mode_s vi_vpss_mode = vi_ctx->mode;
+ 
+ 	if (!ctx->isp_pipe_cfg[pipe].is_enable) {
+ 		return ERR_VI_FAILED_NOT_ENABLED;
+ 	}
+ 
+-	if (ctx->isp_pipe_cfg[pipe].is_offline_scaler) {
+-		create_thread = true;
+-	}
++	ctx->isp_pipe_cfg[pipe].is_offline_scaler = (vi_vpss_mode.mode[pipe] == VI_ONLINE_VPSS_OFFLINE)
++					|| (vi_vpss_mode.mode[pipe] == VI_OFFLINE_VPSS_OFFLINE)
++					|| (vi_vpss_mode.mode[pipe] == VI_SLICE_VPSS_OFFLINE);
+ 
+ 	mmf_chn.dev_id = pipe;
+ 
+@@ -1097,13 +1119,12 @@ int vi_enable_chn(struct vi_dev *vdev, int pipe, int chn)
+ 		}
+ 	}
+ 
+-	if (create_thread) {
+-		vdev->vi_qbuf = vi_sdk_qbuf;
+-		rc = vi_create_thread(vdev, E_VI_TH_EVENT_HANDLER);
+-		if (rc) {
+-			vi_pr(VI_ERR, "Failed to create VI_EVENT_HANDLER thread\n");
+-			goto ERR_CREATE_THREAD;
+-		}
++	vdev->vi_qbuf = vi_sdk_qbuf;
++	vdev->vi_dqbuf = vi_sdk_dqbuf;
++	rc = vi_create_thread(vdev, E_VI_TH_EVENT_HANDLER);
++	if (rc) {
++		vi_pr(VI_ERR, "Failed to create VI_EVENT_HANDLER thread\n");
++		goto ERR_CREATE_THREAD;
+ 	}
+ 
+ 	if (vi_isp_start_streaming(vdev, pipe, chn)) {
+@@ -1146,6 +1167,7 @@ int vi_disable_chn(struct vi_dev *vdev, int pipe, int chn)
+ 		vi_destroy_thread(vdev, E_VI_TH_EVENT_HANDLER);
+ 		vi_destroy_dbg_thread(vdev);
+ 		vdev->vi_qbuf = NULL;
++		vdev->vi_dqbuf = NULL;
+ 	}
+ 
+ 	if (vdev->vi_jobs[pipe][chn].inited) {
+-- 
+2.25.1
+
