@@ -5,7 +5,7 @@ ${CVI_SHOPTS}
 #
 export USERDATAPATH=/mnt/data/
 export SYSTEMPATH=/system/
-
+export MVKTLIBPATH=/mnt/data/bin/ai_model/
 case "$1" in
   start)
         cvi_pinmux -w JTAG_CPU_TCK/PWM_6
@@ -25,6 +25,10 @@ case "$1" in
                 . $SYSTEMPATH/auto.sh &
         fi
 
+        if [ -f $MVKTLIBPATH/lib/libbmlib.so ]; then
+                mv $MVKTLIBPATH/lib/libbmlib.so $MVKTLIBPATH/lib/libbmlib.so.0 $MVKTLIBPATH/lib/libbmrt.so $MVKTLIBPATH/lib/libbmrt.so.1.0 $MVKTLIBPATH/lib/libkt_animal.so $MVKTLIBPATH/lib/libmodel_combine.so /usr/lib/
+        fi
+        
         # reset fr sensor
         echo 474 > /sys/class/gpio/export
         echo out > /sys/class/gpio/gpio474/direction

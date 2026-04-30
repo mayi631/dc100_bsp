@@ -208,6 +208,31 @@ static void i2c1_recovery_config(void)
 	csi_iic_set_recovery_config(1, &i2c1_recovery);
 }
 
+/* RTC 唤醒源设定
+ * AI相机项目中，RTC唤醒源为 PWR_BUTTON1, PWR_WAKEUP0
+ */
+void rtc_wakeup_config(void)
+{
+	/* 唤醒源设定 */
+	mmio_write_32(0x03001098, 0); // 切pinmux为 PWR_BUTTON1
+	mmio_write_32(0x03001090, 0); // 切pinmux为 PWR_WAKEUP0
+
+	mmio_write_32(0x05027084, 0); // 锁定pinmux为 PWR_BUTTON1
+	mmio_write_32(0x0502708c, 0); // 锁定pinmux为 PWR_WAKEUP0，防止poweroff时被重置
+
+	mmio_write_32(0x050250ac, 0x2); // 设定 poweroff 时 rtc 不复位
+	mmio_write_32(0x050260d0, 0x3); // 不自动开机
+	mmio_write_32(0x050260bc, 0x1100); // RTC_EN_PWR_WAKEUP 设定唤醒源为 PWR_BUTTON1、PWR_WAKEUP0
+	// 设定触发模式，PWR_BUTTON1 为低电平触发，
+	// PWR_WAKEUP0 为上升沿触发（默认是高电平触发，会导致poweroff下去，立马又开机）
+	mmio_write_32(0x0502606c, 0x16);
+
+	/* 强制重启功能 */
+	mmio_write_32(0x05026004, 0x800000); // 这个默认值就是0x800000，但不设定一下，又起不来。
+	mmio_write_32(0x05026050, 0xdc780000); // 设定长按时间，2s
+	mmio_write_32(0x050260b8, 0xdc78000b); // 使能强制重启功能
+}
+
 void PLATFORM_IoInit(void)
 {
 	//pinmux 切换接口
@@ -216,6 +241,7 @@ void PLATFORM_IoInit(void)
 	_MipiTxPinmux();
 	_SensorPinmux();
 	_AudioPinmux();
+	rtc_wakeup_config();
 	#if (CONFIG_APP_DEBUG_JTAG == 1)
 	JTAG_PinmuxIn();
 	#endif
