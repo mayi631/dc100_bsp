@@ -188,6 +188,8 @@ def print_usage():
   --check-commit          检查仓库当前 commit 是否与 txt 文件一致
   --applypatch            应用补丁（按 patches 目录）
   -r, --run <cmd>         在每个仓库执行命令
+  --release [dir]         正向发布 release（读取 manifest/release_config.json）
+  --release-reverse [dir] 逆向同步 release（读取 manifest/release_config.json）
 
 {Colors.YELLOW}筛选选项:{Colors.NC}
   --app                   仅操作 APP 仓库
@@ -1493,6 +1495,10 @@ def main():
     parser.add_argument("-c", "--check-env", action="store_true")
     parser.add_argument("--check-commit", action="store_true")
     parser.add_argument("--save", nargs="?", const="", metavar="TXT")
+    parser.add_argument("--release", nargs="?", const="__default__", metavar="DIR",
+                        help="正向发布 release（可选指定输出目录）")
+    parser.add_argument("--release-reverse", nargs="?", const="__default__", metavar="DIR",
+                        help="逆向同步 release（可选指定输入目录）")
     parser.add_argument("--username", type=str, help="指定远程仓库用户名（优先于 gitconfig）")
     parser.add_argument("--normal", action="store_true")
     parser.add_argument("--force", action="store_true")
@@ -1510,6 +1516,16 @@ def main():
 
     if args.no_color:
         config.use_colors = False
+
+    # ── --release ──────────────────────────────────────────────────
+    if args.release is not None:
+        release_dir = args.release if args.release != "__default__" else None
+        _cmd_release(release_dir)
+        sys.exit(0)
+    if args.release_reverse is not None:
+        release_dir = args.release_reverse if args.release_reverse != "__default__" else None
+        _cmd_release_reverse(release_dir)
+        sys.exit(0)
 
     # 设置脚本目录
     script_path = os.path.abspath(__file__)
@@ -1813,16 +1829,166 @@ def main():
         sys.exit(0)
 
 
+def _cmd_release(release_dir):
+    """repos --release：读取 manifest/release_config.json 执行正向发布
+    release_dir=None 时仅生成本地 release 目录，不额外同步。
+    """
+    _run_release("forward", release_dir)
+
+
+def _cmd_release_reverse(release_dir):
+    """repos --release-reverse：读取 manifest/release_config.json 执行逆向同步
+    release_dir=None 时默认读取本地 release_output。
+    """
+    _run_release("reverse", release_dir)
+
+
+def _run_release(mode, release_dir):
+    """release 内核：mode=forward/reverse。"""
+    import json
+
+    SRC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    LOCAL_RLS = os.path.join(SRC_DIR, "release_output")
+
+    config_path = os.path.join(SRC_DIR, "manifest", "release_config.json")
+    if not os.path.exists(config_path):
+        print(config.colored(f"错误: 未找到 release 配置文件: {config_path}", Colors.RED))
+        sys.exit(1)
+
+    with open(config_path) as f:
+        cfg = json.load(f)
+    table = cfg.get("entries", [])
+    print(f"{Colors.GREEN}✓ 已加载 release 配置: {config_path}{Colors.NC}")
+    print(f"  version: {cfg.get('version', 'unknown')}")
+    print(f"  entries: {len(table)}")
+    if mode == "reverse":
+        in_dir = os.path.abspath(release_dir) if release_dir else LOCAL_RLS
+        if not os.path.exists(in_dir):
+            print(config.colored(f"错误: 逆向输入目录不存在: {in_dir}", Colors.RED))
+            sys.exit(1)
+        print(f"  reverse input: {in_dir}")
+
+    RSYNC_OPTS = ["rsync", "-a", "--exclude=.git"]
+
+    def _run(cmd, **kwargs):
+        print(f"  $ {' '.join(cmd)}")
+        subprocess.run(cmd, check=True, **kwargs)
+
+    def _rsync(src, dst, excludes=None):
+        excludes = excludes or []
+        exclude_opts = [f"--exclude={item}" for item in excludes]
+        if os.path.isdir(src):
+            os.makedirs(dst, exist_ok=True)
+            _run([*RSYNC_OPTS, *exclude_opts, f"{src}/", f"{dst}/"])
+        elif os.path.isfile(src):
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            _run([*RSYNC_OPTS, *exclude_opts, src, dst])
+
+    def _cpfl(src, dst, excludes=None):
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        if os.path.lexists(dst):
+            _run(["rm", "-rf", dst])
+        _run(["cp", "-rfL", src, dst])
+
+    OPS = {"rsync": _rsync, "cpfl": _cpfl}
+
+    def _parse_entry(entry):
+        src_rel = entry.get("src")
+        dst_rel = entry.get("dst")
+        if not src_rel or not dst_rel:
+            raise ValueError(f"release entry 必须显式配置 src/dst: {entry}")
+
+        direction = entry.get("dir", "↔")
+        forward = entry.get("forward")
+        reverse = entry.get("reverse")
+        if forward is None:
+            forward = direction in ("→", "↔")
+        if reverse is None:
+            reverse = direction in ("←", "↔")
+
+        op = entry.get("op", "rsync")
+        if op not in OPS:
+            raise ValueError(f"不支持的 op: {op}, entry={entry}")
+        excludes = entry.get("exclude", [])
+        if excludes is None:
+            excludes = []
+        if not isinstance(excludes, list) or any(not isinstance(item, str) for item in excludes):
+            raise ValueError(f"exclude 必须是字符串数组: {entry}")
+
+        return {
+            "src": src_rel,
+            "dst": dst_rel,
+            "forward": bool(forward),
+            "reverse": bool(reverse),
+            "op": op,
+            "exclude": excludes,
+        }
+
+    if mode == "forward":
+        rls = LOCAL_RLS
+        if os.path.exists(rls):
+            shutil.rmtree(rls)
+        print(f"创建发布目录: {rls}")
+        os.makedirs(rls, exist_ok=True)
+    else:
+        rls = None
+
+    for entry in table:
+        item = _parse_entry(entry)
+        if mode == "forward" and not item["forward"]:
+            continue
+        if mode == "reverse" and not item["reverse"]:
+            continue
+
+        if mode == "forward":
+            src_rel, dst_rel = item["src"], item["dst"]
+            src = os.path.join(SRC_DIR, src_rel)
+            dst = os.path.join(rls, dst_rel)
+        else:
+            src_rel, dst_rel = item["dst"], item["src"]
+            src = os.path.join(in_dir, src_rel)
+            dst = os.path.join(SRC_DIR, dst_rel)
+
+        op = item["op"]
+        excludes = item["exclude"]
+        if not os.path.exists(src):
+            print(f"  ⚠ 不存在，跳过: {src_rel}")
+            continue
+        if excludes:
+            print(f"  [{op}] {src_rel} → {dst_rel} (exclude={excludes})")
+        else:
+            print(f"  [{op}] {src_rel} → {dst_rel}")
+        OPS[op](src, dst, excludes)
+
+    if mode == "forward":
+        if release_dir:
+            out_dir = os.path.abspath(release_dir)
+            if not os.path.exists(out_dir):
+                ans = input(f"输出目录不存在: {out_dir}，是否创建? (y/N): ").strip().lower()
+                if ans not in ("y", "yes"):
+                    print("已取消")
+                    sys.exit(0)
+                os.makedirs(out_dir, exist_ok=True)
+            print(f"同步到指定目录: {out_dir}")
+            _run([*RSYNC_OPTS, "--delete", f"{rls}/", f"{out_dir}/"])
+
+        print(f"\n发布完成: {rls}")
+        if release_dir:
+            print(f"  同步目标: {os.path.abspath(release_dir)}")
+    else:
+        print(f"\n逆向同步完成: {in_dir}")
+
+
 def find_config_file() -> Optional[Path]:
     """获取配置文件路径（优先脚本目录，其次 ../manifest）"""
     script_path = os.path.abspath(__file__)
     script_dir = os.path.dirname(script_path)
     script_config = Path(script_dir) / "repo_config"
-    if script_config.exists():
+    if script_config.is_file():
         return script_config
 
     manifest_config = Path(script_dir).parent / "manifest" / "repo_config"
-    if manifest_config.exists():
+    if manifest_config.is_file():
         return manifest_config
 
     return script_config
