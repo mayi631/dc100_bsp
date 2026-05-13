@@ -10,6 +10,11 @@ import argparse
 import os
 import sys
 import subprocess
+import threading
+import signal
+import time
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 # import shlex
 import xml.etree.ElementTree as ET
 import re
@@ -18,7 +23,7 @@ import colorama
 from email.header import decode_header
 from email.utils import parseaddr
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, Set
 from dataclasses import dataclass, field
 
 # 初始化 colorama 以支持彩色输出
@@ -35,6 +40,49 @@ class Colors:
 # 状态表情符号
 OK_STATUS = "✅"
 FAIL_STATUS = "❌"
+DEFAULT_CLONE_MAX_WORKERS = 10
+INTERRUPTED_EXIT_CODE = 130
+
+_active_processes_lock = threading.Lock()
+_active_processes: Set[subprocess.Popen] = set()
+_shutdown_event = threading.Event()
+logger = logging.getLogger("repos")
+
+
+class ReposLogFormatter(logging.Formatter):
+    """为 clone 生命周期日志提供更明显的配色。"""
+    CLONE_START_COLOR = colorama.Fore.CYAN + colorama.Style.BRIGHT
+    CLONE_END_COLOR = colorama.Fore.GREEN + colorama.Style.BRIGHT
+    WARN_COLOR = colorama.Fore.YELLOW + colorama.Style.BRIGHT
+    RESET = colorama.Style.RESET_ALL
+
+    def format(self, record: logging.LogRecord) -> str:
+        message = super().format(record)
+        if getattr(record, "clone_event", False):
+            phase = getattr(record, "clone_phase", "")
+            color = self.CLONE_START_COLOR if phase == "start" else self.CLONE_END_COLOR
+            return f"{color}{message}{self.RESET}"
+        if record.levelno >= logging.WARNING:
+            return f"{self.WARN_COLOR}{message}{self.RESET}"
+        return message
+
+
+def log_clone_event(phase: str, message: str, *args):
+    logger.info(message, *args, extra={"clone_event": True, "clone_phase": phase})
+
+
+def setup_logging():
+    """初始化线程安全日志输出。"""
+    handler = logging.StreamHandler()
+    formatter = ReposLogFormatter(
+        "[%(asctime)s] [%(threadName)s] %(levelname)s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    handler.setFormatter(formatter)
+    logger.handlers = []
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
 
 
 @dataclass
@@ -190,6 +238,63 @@ def run_cmd(cmd: List[str], cwd: Optional[str] = None, check: bool = True,
         print(f"{Colors.RED}命令失败: {' '.join(cmd)}{Colors.NC}")
         print(f"{Colors.RED}错误: {e.stderr}{Colors.NC}")
         raise
+
+
+def run_cmd_stream(cmd: List[str], cwd: Optional[str] = None,
+                   env: Optional[Dict[str, str]] = None) -> int:
+    """运行命令并继承终端输出，支持 Ctrl+C 时集中终止。"""
+    if _shutdown_event.is_set():
+        return INTERRUPTED_EXIT_CODE
+
+    process = subprocess.Popen(cmd, cwd=cwd, env=env)
+    with _active_processes_lock:
+        _active_processes.add(process)
+
+    try:
+        return process.wait()
+    finally:
+        with _active_processes_lock:
+            _active_processes.discard(process)
+
+
+def terminate_active_processes():
+    """终止所有正在运行的子进程，先 terminate 再 kill。"""
+    with _active_processes_lock:
+        processes = [p for p in _active_processes if p.poll() is None]
+
+    for process in processes:
+        try:
+            process.terminate()
+        except ProcessLookupError:
+            pass
+
+    deadline = time.time() + 2.0
+    for process in processes:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            break
+        try:
+            process.wait(timeout=remaining)
+        except subprocess.TimeoutExpired:
+            continue
+
+    for process in processes:
+        if process.poll() is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+
+
+def handle_sigint(signum, frame):
+    """一次 Ctrl+C 立即停止所有并发子进程。"""
+    del signum, frame
+    if _shutdown_event.is_set():
+        return
+    _shutdown_event.set()
+    logger.warning("检测到 Ctrl+C，正在终止所有进行中的任务...")
+    terminate_active_processes()
+    raise KeyboardInterrupt
 
 
 def get_username(cli_username: Optional[str] = None) -> str:
@@ -617,9 +722,11 @@ def update_submodules_if_needed(path: Path, project: RepoProject) -> bool:
 def git_clone(project: RepoProject):
     """克隆单个仓库"""
     path = Path.cwd() / project.path
+    log_clone_event("start", "START clone: %s -> %s", project.name, project.path)
 
     if path.exists():
         print(config.colored(f"警告: 项目已存在: {path}", Colors.YELLOW))
+        log_clone_event("end", "END clone(skip): %s", project.name)
         return update_submodules_if_needed(path, project)
 
     # 构建克隆命令
@@ -633,9 +740,18 @@ def git_clone(project: RepoProject):
 
     print(f"正在克隆 {project.name}...")
     # print(f"  clone cmd: {shlex.join(cmd)}")
-    result = run_cmd(cmd, check=False, capture_output=False)
-    if result.returncode != 0:
-        print(config.colored(f"克隆 {project.name} 失败", Colors.RED))
+    return_code = run_cmd_stream(cmd)
+    if return_code != 0:
+        if return_code == INTERRUPTED_EXIT_CODE or _shutdown_event.is_set():
+            print(config.colored(f"克隆 {project.name} 已中断", Colors.YELLOW))
+        else:
+            print(config.colored(f"克隆 {project.name} 失败", Colors.RED))
+        log_clone_event("end", "END clone(fail): %s", project.name)
+        return False
+
+    if _shutdown_event.is_set():
+        print(config.colored(f"克隆 {project.name} 已中断", Colors.YELLOW))
+        log_clone_event("end", "END clone(interrupted): %s", project.name)
         return False
 
     # 复制 hooks
@@ -662,7 +778,57 @@ def git_clone(project: RepoProject):
         symlink_path.symlink_to(project.path)
         print(f"  已创建软链接: {project.folder_name} -> {project.path}")
 
-    return update_submodules_if_needed(path, project)
+    ok = update_submodules_if_needed(path, project)
+    status = "ok" if ok else "submodule-fail"
+    log_clone_event("end", "END clone(%s): %s", status, project.name)
+    return ok
+
+
+def build_clone_batches(projects: List[RepoProject]) -> List[List[RepoProject]]:
+    """按路径层级构建克隆批次：父路径仓库先于子路径仓库。"""
+    if not projects:
+        return []
+
+    indexed_projects = list(enumerate(projects))
+    indegree = {idx: 0 for idx, _ in indexed_projects}
+    children: Dict[int, List[int]] = {idx: [] for idx, _ in indexed_projects}
+
+    for parent_idx, parent in indexed_projects:
+        parent_path = parent.path.strip("/")
+        if not parent_path:
+            continue
+        for child_idx, child in indexed_projects:
+            if parent_idx == child_idx:
+                continue
+            child_path = child.path.strip("/")
+            if not child_path:
+                continue
+            if child_path.startswith(parent_path + "/"):
+                children[parent_idx].append(child_idx)
+                indegree[child_idx] += 1
+
+    batches: List[List[RepoProject]] = []
+    ready = sorted([idx for idx, d in indegree.items() if d == 0], key=lambda i: projects[i].path)
+    processed = 0
+
+    while ready:
+        batch_indexes = ready
+        ready = []
+        batches.append([projects[i] for i in batch_indexes])
+        processed += len(batch_indexes)
+
+        for idx in batch_indexes:
+            for child_idx in children[idx]:
+                indegree[child_idx] -= 1
+                if indegree[child_idx] == 0:
+                    ready.append(child_idx)
+        ready.sort(key=lambda i: projects[i].path)
+
+    # 理论上不会有环；若异常则退回单批次，避免阻塞功能
+    if processed != len(projects):
+        return [projects]
+
+    return batches
 
 def reproduce_repo(project: RepoProject, txt_file: str):
     """复现仓库到指定提交"""
@@ -724,16 +890,35 @@ def save_commit_ids(projects: List[RepoProject], txt_file: str):
             print(f"  跳过: {project.path} (非 git 仓库)")
             continue
 
-        # 获取当前 commit_id
-        result = run_cmd(["git", "rev-parse", "HEAD"], cwd=str(path), check=False)
-        if result.returncode != 0:
+        # 优先保存 HEAD 与上游分支的共同基线点（merge-base）；无上游时回退到本地 HEAD
+        commit_ref = "HEAD"
+        result = run_cmd(["git", "symbolic-ref", "-q", "HEAD"], cwd=str(path), check=False)
+        branch_ref = result.stdout.strip() if result.returncode == 0 and result.stdout else ""
+        if branch_ref:
+            result = run_cmd(
+                ["git", "for-each-ref", "--format=%(upstream:short)", branch_ref],
+                cwd=str(path),
+                check=False
+            )
+            upstream = result.stdout.strip() if result.returncode == 0 and result.stdout else ""
+            if upstream:
+                result = run_cmd(["git", "merge-base", "HEAD", upstream], cwd=str(path), check=False)
+                if result.returncode == 0 and result.stdout.strip():
+                    commit_ref = result.stdout.strip()
+
+        result = run_cmd(["git", "rev-parse", commit_ref], cwd=str(path), check=False)
+        if result.returncode != 0 or not result.stdout.strip():
             print(f"  跳过: {project.path} (无法获取 commit)")
             continue
 
         commit_id = result.stdout.strip()
 
         # 获取 commit message（第一行）
-        result = run_cmd(["git", "log", "-1", "--pretty=format:%s"], cwd=str(path), check=False)
+        result = run_cmd(
+            ["git", "log", "-1", "--pretty=format:%s", commit_ref],
+            cwd=str(path),
+            check=False
+        )
         commit_msg = result.stdout.strip() if result.returncode == 0 else ""
 
         folder_name = project.folder_name
@@ -741,7 +926,7 @@ def save_commit_ids(projects: List[RepoProject], txt_file: str):
         lines.append(f"commit_id: {commit_id} {commit_msg}")
         lines.append("")
 
-        print(f"  ✓ {folder_name}: {commit_id[:8]}")
+        print(f"  ✓ {folder_name}: {commit_id[:8]} ({commit_ref[:12] if commit_ref != 'HEAD' else 'HEAD'})")
 
     # 写入文件
     with open(txt_path, 'w', encoding='utf-8') as f:
@@ -1292,6 +1477,8 @@ def apply_patches(projects: List[RepoProject], patches_dir: str, txt_file: str,
 def main():
     """主函数"""
     global config
+    setup_logging()
+    signal.signal(signal.SIGINT, handle_sigint)
 
     if len(sys.argv) < 2:
         print_usage()
@@ -1329,7 +1516,8 @@ def main():
     config.script_dir = os.path.dirname(script_path)
 
     # 检查 .git 目录
-    if not args.force and not args.reproduce and not args.applypatch and not args.save and not args.run:
+    if (not args.force and not args.reproduce and not args.applypatch
+            and args.save is None and not args.run):
         if os.path.isdir(".git"):
             print(config.colored("警告: 当前目录包含 .git", Colors.YELLOW))
             sys.exit(1)
@@ -1416,10 +1604,28 @@ def main():
 
         # 执行操作
         if action == "clone":
+            clone_batches = build_clone_batches(projects)
+            cpu_count = os.cpu_count() or 1
+            clone_max_workers = min(cpu_count, DEFAULT_CLONE_MAX_WORKERS)
+            worker_count = min(clone_max_workers, max(len(projects), 1))
+            print(f"并行克隆模式: 最大并发 {worker_count}，依赖分批 {len(clone_batches)} 层")
             ok = True
-            for project in projects:
-                if not git_clone(project):
-                    ok = False
+            for batch_idx, batch_projects in enumerate(clone_batches, start=1):
+                batch_workers = min(worker_count, len(batch_projects))
+                print(f"  第 {batch_idx}/{len(clone_batches)} 批: {len(batch_projects)} 个仓库，并发 {batch_workers}")
+                with ThreadPoolExecutor(max_workers=batch_workers) as executor:
+                    future_to_project = {
+                        executor.submit(git_clone, project): project for project in batch_projects
+                    }
+                    for future in as_completed(future_to_project):
+                        project = future_to_project[future]
+                        try:
+                            if not future.result():
+                                ok = False
+                                print(config.colored(f"克隆任务失败: {project.name}", Colors.RED))
+                        except Exception as exc:
+                            ok = False
+                            print(config.colored(f"克隆任务异常: {project.name}, {exc}", Colors.RED))
             return ok
         elif action == "reproduce":
             if txt_file:
@@ -1572,7 +1778,7 @@ def main():
             apply_patches(projects, patches_dir, txt_file, applied_repos, force=args.force)
         sys.exit(0)
 
-    if args.save:
+    if args.save is not None:
         # 如果指定了输出文件，添加后缀区分 bsp/app
         custom_output = args.save if args.save else None
         for name, cfg in get_filtered_targets():

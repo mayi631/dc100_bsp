@@ -1,0 +1,26 @@
+From 5db59292f89d55edf30470f170220665f1c049f0 Mon Sep 17 00:00:00 2001
+From: "xiu.yang" <xiu.yang@sophgo.com>
+Date: Tue, 31 Mar 2026 19:36:19 +0800
+Subject: [PATCH] fix:the offset of pkg's type
+
+Change-Id: I6211100e490044007b8050ab50900258015397d1
+---
+ drivers/ddr/ddr_pkg_info.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/ddr/ddr_pkg_info.c b/drivers/ddr/ddr_pkg_info.c
+index d332e9c..c17aeab 100644
+--- a/drivers/ddr/ddr_pkg_info.c
++++ b/drivers/ddr/ddr_pkg_info.c
+@@ -91,7 +91,7 @@ void read_ddr_pkg_info(void)
+ 
+ 	//if onebin, need to set datarate here
+ 
+-	pkg = FIELD_GET(efuse_leakage, 2, 0);
++	pkg = FIELD_GET(efuse_leakage, 31, 29);
+ 	//pkg = PKG_QFN;
+ 
+ 	switch (ddr_capacity) {
+-- 
+2.25.1
+

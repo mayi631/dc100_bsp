@@ -1,0 +1,29 @@
+From 1d27a7c7d6066586cc4b136f379028589b348f73 Mon Sep 17 00:00:00 2001
+From: Zihao Bo <zihao.bo@sophgo.com>
+Date: Thu, 12 Mar 2026 14:38:12 +0800
+Subject: [PATCH] [fix](ddr):Fix a mistake on NY 1Gb DDR pinmux setting
+ [description ]:A10 missed in the previous version, lead to byte1 wrlvl fail
+ and full mem bist fail. [root   cause]:NY 1Gb KGD fit [JIRA      ID]:NA [chip
+ project]:cv184x [side effects]:NA [Affected *.ko/*.so/*.a] :NA
+
+Change-Id: I0ed5082a0ab1e7b3e9b2c14be0ac1ceaf5c46fc4
+---
+ drivers/ddr/cvx16_pinmux.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/ddr/cvx16_pinmux.c b/drivers/ddr/cvx16_pinmux.c
+index be5aaf9..005d093 100644
+--- a/drivers/ddr/cvx16_pinmux.c
++++ b/drivers/ddr/cvx16_pinmux.c
+@@ -45,7 +45,7 @@ void cvx16_pinmux(void)
+ 		mmio_write_32(0x0004 + PHYD_BASE_ADDR, 0x07040109);
+ 		mmio_write_32(0x0008 + PHYD_BASE_ADDR, 0x1405020C);
+ 		mmio_write_32(0x000C + PHYD_BASE_ADDR, 0x15030F00);
+-		mmio_write_32(0x0010 + PHYD_BASE_ADDR, 0x0F0A1213);
++		mmio_write_32(0x0010 + PHYD_BASE_ADDR, 0x0A0F1213);
+ 		mmio_write_32(0x0014 + PHYD_BASE_ADDR, 0x00111016);
+ 		mmio_write_32(0x0018 + PHYD_BASE_ADDR, 0x00000000);
+ 		mmio_write_32(0x001C + PHYD_BASE_ADDR, 0x00000100);
+-- 
+2.25.1
+
