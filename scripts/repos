@@ -721,7 +721,7 @@ def update_submodules_if_needed(path: Path, project: RepoProject) -> bool:
     return True
 
 
-def git_clone(project: RepoProject):
+def git_clone(project: RepoProject, hook_policy: str = "none"):
     """克隆单个仓库"""
     path = Path.cwd() / project.path
     log_clone_event("start", "START clone: %s -> %s", project.name, project.path)
@@ -756,12 +756,17 @@ def git_clone(project: RepoProject):
         log_clone_event("end", "END clone(interrupted): %s", project.name)
         return False
 
-    # 复制 hooks
+    # 按目标策略复制 hooks:
+    # - all: 复制全部 hooks
+    # - skip-pre-commit: 跳过 pre-commit，复制其它 hooks
+    # - none: 不复制 hooks
     hooks_src = Path(config.script_dir) / "hooks"
-    if hooks_src.exists():
+    if hook_policy != "none" and hooks_src.exists():
         hooks_dst = path / ".git" / "hooks"
         for hook_file in hooks_src.glob("*"):
             if hook_file.is_file():
+                if hook_policy == "skip-pre-commit" and hook_file.name == "pre-commit":
+                    continue
                 shutil.copy2(hook_file, hooks_dst / hook_file.name)
                 print(f"  已复制 hook: {hook_file.name}")
 
@@ -1631,7 +1636,11 @@ def main():
                 print(f"  第 {batch_idx}/{len(clone_batches)} 批: {len(batch_projects)} 个仓库，并发 {batch_workers}")
                 with ThreadPoolExecutor(max_workers=batch_workers) as executor:
                     future_to_project = {
-                        executor.submit(git_clone, project): project for project in batch_projects
+                        executor.submit(
+                            git_clone,
+                            project,
+                            "all" if name == "APP" else "skip-pre-commit"
+                        ): project for project in batch_projects
                     }
                     for future in as_completed(future_to_project):
                         project = future_to_project[future]

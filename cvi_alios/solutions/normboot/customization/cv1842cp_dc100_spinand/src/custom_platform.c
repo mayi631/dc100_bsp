@@ -273,45 +273,44 @@ void _PanelPinmux(void)
 	PINMUX_CONFIG(JTAG_CPU_TCK, PWM_6); // LCD_BL
 }
 
-void _PWRButtonPinmux(void)
+// 检测是否是看门狗或reboot触发的开机
+static bool _IsRebootOrWatchdogWakeup(void)
 {
-	// PWR_BUTTON1 pinmux unlock
-	// "IOBLK_GRTC_REG_PWR_BUTTON1 0x0502_7020"
-	// "FMUX_GPIO_REG_IOCTRL_PWR_BUTTON1 0x0300_1098"
-	// printf("PWR_BUTTON1 pinmux unlock\n");
-	// PINMUX_CONFIG(PWR_BUTTON1, PWR_GPIO_8);
+    // bit26: REBOOT flag, bit27: WATCHDOG flag
+    return ((mmio_read_32(0x050260f8) >> 26) & 0x3) != 0;
+}
+
+// 检测PWR_BUTTON1是否按下
+// 返回: true-按键按下, false-按键未按下
+static bool _IsPowerButtonPressed(void)
+{
 	// PWR_GPIO6 INPUT MODE
 	mmio_write_32(0x05021004, mmio_read_32(0x05021004) & 0xFFFFFFBF);
 	// DETECT PWR_WAKEUP0 LEVEL
 	uint32_t key_value = mmio_read_32(0x05021050) & 0x40;
-	if(!key_value) {
-		// printf("PWR_BUTTON1 is not pressed\n");
-		mmio_write_32(0x050260c0, 0x1);
+	return key_value != 0;
+}
+
+static void PowerKeyCheck(void)
+{
+	if (!_IsPowerButtonPressed()) {
+		// 未按下电源键，走 poweroff 流程
+		mmio_write_32(0x050260c0, 0x1); // 使能软件请求下电
 		while (mmio_read_32(0x050260c0) != 0x1)
 			;
-		mmio_write_32(0x05025004, 0xab18);
-		mmio_write_32(0x03001098, 0); // 切pinmux为 PWR_BUTTON1
-		mmio_write_32(0x03001090, 0); // 切pinmux为 PWR_WAKEUP0
-
-		mmio_write_32(0x05027084, 0); // 锁定pinmux为 PWR_BUTTON1
-		mmio_write_32(0x0502708c, 0); // 锁定pinmux为 PWR_WAKEUP0，防止poweroff时被重置
-
-		mmio_write_32(0x050250ac, 0x2); // 设定 poweroff 时 rtc 不复位
-		mmio_write_32(0x050260d0, 0x3); // 不自动开机
-		mmio_write_32(0x050260bc, 0x1100); // RTC_EN_PWR_WAKEUP 设定唤醒源为 PWR_BUTTON1、PWR_WAKEUP0
-		// 设定触发模式，PWR_BUTTON1 为低电平触发，
-		// PWR_WAKEUP0 为上升沿触发（默认是高电平触发，会导致poweroff下去，立马又开机）
-		mmio_write_32(0x0502606c, 0x16);
-
-		while (1){
-			mmio_write_32(0x05025008, 0x10001);
+		mmio_write_32(0x05025004, 0xab18); // 解锁对 RTC_CTRL0(0x05025008) 的读写
+		while (1) {
+			mmio_write_32(0x05025008, 0x10001); // 请求下电
 		}
 	}
 }
 
 int PLATFORM_PanelInit(void)
 {
-	_PWRButtonPinmux();
+	// 看门狗或reboot触发的开机，不检测按键，直接继续启动
+	if (!_IsRebootOrWatchdogWakeup()) {
+		PowerKeyCheck();
+	}
 	_PanelPinmux();
 #if (!defined(CONFIG_SUPPORT_VO) || (CONFIG_SUPPORT_VO))
 #if CONFIG_PANEL_HX8394
