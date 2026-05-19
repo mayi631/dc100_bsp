@@ -136,3 +136,17 @@
 		#clock-cells = <0>;
 	};
 };
+
+&dac {
+	/delete-property/ mute-gpio-r;
+};
+
+&{/sound_dac} {
+	dai@0 {
+		fmt = "IBIF";
+	};
+};
+
+&usb {
+	/delete-property/ vbus-gpio;
+};

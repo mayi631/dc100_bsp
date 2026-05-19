@@ -168,3 +168,6 @@ CONFIG_BUILD_FOR_DEBUG=n
 
 # enable bootlogo
 CONFIG_PACK_BOOTLOGO=y
+
+# audio on linux
+CONFIG_AUD_DRV_SEL=n
