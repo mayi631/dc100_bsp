@@ -4,7 +4,7 @@
   <partition label="fip" size_in_kb="2560" readonly="false" file="fip_spl.bin" mountpoint="" type=""/>
   <partition label="2nd" size_in_kb="3072" readonly="false" file="yoc.bin" mountpoint="" type=""/>
   <partition label="BOOT" size_in_kb="8192" readonly="false" file="boot.spinand" mountpoint="" type=""/>
-  <partition label="MISC" size_in_kb="384" readonly="false" file="logo.jpg" mountpoint="" type=""/>
+  <partition label="MISC" size_in_kb="896" readonly="false" file="logo.jpg" mountpoint="" type=""/>
   <partition label="ENV" size_in_kb="128" readonly="false" file="" mountpoint="" type=""/>
   <partition label="ENV_BAK" size_in_kb="128" readonly="false" file="" mountpoint="" type=""/>
   <partition label="ROOTFS" size_in_kb="30720" readonly="false" file="rootfs.spinand" mountpoint="" type=""/>

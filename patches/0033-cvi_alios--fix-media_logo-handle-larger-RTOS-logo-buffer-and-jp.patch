@@ -1,0 +1,93 @@
+From 54a0381fc3b26072ede37daf4b2eb44f516dd799 Mon Sep 17 00:00:00 2001
+From: "song.yu" <song.yu@sophgo.com>
+Date: Wed, 20 May 2026 21:22:04 +0800
+Subject: [PATCH] fix(media_logo): handle larger RTOS logo buffer and jpeg
+ frame boundary
+
+[description ]:
+- Replace fixed logo parse range with CVIMMAP_RTOS_LOGO_SIZE so
+MJPEG logo parsing covers the full RTOS logo memory region.
+- Fix JPEG frame length calculation from i + 3 - u32Start to i +
+2 - u32Start to avoid one-byte over-read across frame boundaries.
+- Add explicit JPEG EOI check and fail fast when end code is not
+found, preventing truncated frame data from being sent to VDEC.
+
+[root   cause]:
+- The parser used a hardcoded 256 KiB limit while the RTOS logo
+memory region is 1 MiB, so larger logo payloads were truncated during
+frame scan.
+- The frame length had an off-by-one error that could include one
+extra byte and cause boundary drift between adjacent JPEG frames.
+- On larger payloads, the truncation/off-by-one combination led to
+invalid stream slices and decode wait timeout/error paths.
+
+[JIRA      ID]:CV184XSDK-1260
+[chip project]:184x
+[side effects]:
+- Affects only RTOS logo MJPEG parsing and VDEC input slicing path
+in media logo playback.
+- Verified by code-path inspection for both normal EOF and
+missing-EOI failure branches.
+- No impact expected on non-logo media pipeline paths.
+
+[Affected *.ko/*.so/*.a] :source-only change, no .ko/.so/.a binary
+directly modified
+
+Change-Id: Ie18d399124519b2449e4e039405f4114e5a4a894
+---
+ components/cvi_platform/media/src/media_logo.c | 13 +++++++++++--
+ 1 file changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/components/cvi_platform/media/src/media_logo.c b/components/cvi_platform/media/src/media_logo.c
+index 3be513d6..00dfefed 100644
+--- a/components/cvi_platform/media/src/media_logo.c
++++ b/components/cvi_platform/media/src/media_logo.c
+@@ -22,7 +22,7 @@
+ // #include "dsi_panels.h"
+ 
+ 
+-#define READ_LEN_MAX 256*1024
++#define READ_LEN_MAX CVIMMAP_RTOS_LOGO_SIZE
+ 
+ typedef struct _VDEC_ATTR {
+ 	PAYLOAD_TYPE_E enType;
+@@ -331,6 +331,7 @@ int CVI_Media_Vdec_Logo(void)
+     VIDEO_FRAME_INFO_S pstFrameInfo = {0};
+     CVI_U8 * pu8Buf = (CVI_U8 *)CVIMMAP_RTOS_LOGO_ADDR;
+     CVI_BOOL bFindStart = 0;
++    CVI_BOOL bFindEnd = 0;
+     CVI_U32 u32Len = 0, u32Start = 0;
+     CVI_U32 s32ReadLen = 0;
+     int i = 0;
+@@ -382,12 +383,14 @@ int CVI_Media_Vdec_Logo(void)
+             }
+         }
+ 
++        bFindEnd = CVI_FALSE;
+         for (; i < READ_LEN_MAX - 1; i++) {
+             if (pu8Buf[i] == 0xFF && pu8Buf[i + 1] == 0xD9) {
++                bFindEnd = CVI_TRUE;
+                 break;
+             }
+         }
+-        s32ReadLen = i + 3 - u32Start;
++        s32ReadLen = i + 2 - u32Start;
+         i += 2;
+ 
+         if (bFindStart == CVI_FALSE) {
+@@ -396,6 +399,12 @@ int CVI_Media_Vdec_Logo(void)
+             CVI_VB_Exit();
+             return CVI_FAILURE;
+         }
++        if (bFindEnd == CVI_FALSE) {
++            printf("can not find JPEG end code!!\n");
++            _vdec_deinit(vdec_attr_logo);
++            CVI_VB_Exit();
++            return CVI_FAILURE;
++        }
+ 
+         printf("file u32Start is %d, s32ReadLen is %d\n", u32Start, s32ReadLen);
+ 
+-- 
+2.25.1
+
