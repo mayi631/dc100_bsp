@@ -186,7 +186,7 @@ def print_usage():
   --reproduce             复现仓库到指定 commit（按 txt 文件）
   -c, --check-env         检查 clone/分支/commit/patch/submodule 是否完全同步
   --check-commit          检查仓库当前 commit 是否与 txt 文件一致
-  --applypatch            应用补丁（按 patches 目录）
+  --applypatch            应用补丁（按 patches / patches_private / patches_public 规则）
   -r, --run <cmd>         在每个仓库执行命令
   --release [dir]         正向发布 release（读取 manifest/release_config.json）
   --release-reverse [dir] 逆向同步 release（读取 manifest/release_config.json）
@@ -409,6 +409,36 @@ def sort_patch_files(patch_files: List[Path]) -> List[Path]:
         return (9999, name)
 
     return sorted(patch_files, key=sort_key)
+
+
+def resolve_patch_dirs(script_dir: str) -> List[Path]:
+    """按约定选择补丁目录：三个目录都可选，按存在情况取用。"""
+    base_dir = Path(script_dir).parent
+    patches_dir = base_dir / "patches"
+    private_dir = base_dir / "patches_private"
+    public_dir = base_dir / "patches_public"
+
+    dirs = []
+    if patches_dir.exists():
+        dirs.append(patches_dir)
+    if private_dir.exists():
+        dirs.append(private_dir)
+    elif public_dir.exists():
+        dirs.append(public_dir)
+
+    return dirs
+
+
+def collect_patch_files(patch_dirs: List[Path], repo_name: str) -> List[Path]:
+    """收集同一仓库在多个补丁目录下的 patch 文件。"""
+    patch_files: List[Path] = []
+    for patch_dir in patch_dirs:
+        if not patch_dir.exists():
+            continue
+        patch_files.extend(
+            patch_dir.glob(f"[0-9][0-9][0-9][0-9]-{repo_name}--*.patch")
+        )
+    return sort_patch_files(patch_files)
 
 
 def normalize_spaces(value: str) -> str:
@@ -1184,13 +1214,13 @@ def check_expected_commits(projects: List[RepoProject], txt_file: str, target_na
     return issues
 
 
-def check_patch_sync(projects: List[RepoProject], txt_file: str, patches_dir: str, target_name: str) -> List[str]:
+def check_patch_sync(projects: List[RepoProject], txt_file: str, patch_dirs: List[Path], target_name: str) -> List[str]:
     """先比数量，再按 From/Date/Subject（Subject 去 []）精确比对补丁。"""
     issues = []
-    patches_path = Path(patches_dir)
 
-    if not patches_path.exists():
-        issues.append(f"[{target_name}] 未找到 patches 目录: {patches_dir}")
+    if not patch_dirs:
+        dirs_text = ", ".join(str(p) for p in patch_dirs)
+        issues.append(f"[{target_name}] 未找到可用 patch 目录: {dirs_text}")
         return issues
 
     for project in projects:
@@ -1228,9 +1258,7 @@ def check_patch_sync(projects: List[RepoProject], txt_file: str, patches_dir: st
             continue
 
         repo_name = project.folder_name
-        patch_files = sort_patch_files(
-            list(patches_path.glob(f"[0-9][0-9][0-9][0-9]-{repo_name}--*.patch"))
-        )
+        patch_files = collect_patch_files(patch_dirs, repo_name)
         expected_count = len(patch_files)
 
         result = run_cmd(
@@ -1385,17 +1413,17 @@ def check_sync_sh(script_dir: str) -> List[str]:
     return issues
 
 
-def apply_patches(projects: List[RepoProject], patches_dir: str, txt_file: str,
+def apply_patches(projects: List[RepoProject], patch_dirs: List[Path], txt_file: str,
                   applied_repos: Optional[set] = None, force: bool = False):
     """向仓库应用补丁（按 projects 遍历）"""
-    patches_path = Path(patches_dir)
     txt_file = Path(txt_file).resolve()
 
     if applied_repos is None:
         applied_repos = set()
 
-    if not patches_path.exists():
-        print(config.colored(f"错误: 未找到 patches 目录: {patches_dir}", Colors.RED))
+    if not patch_dirs:
+        dirs_text = ", ".join(str(p) for p in patch_dirs)
+        print(config.colored(f"错误: 未找到可用 patch 目录: {dirs_text}", Colors.RED))
         return
 
     if not txt_file.exists():
@@ -1426,8 +1454,7 @@ def apply_patches(projects: List[RepoProject], patches_dir: str, txt_file: str,
             continue
 
         # 应用补丁 - 格式: 序号-repo--*.patch (如 0001-sophcam--fix-bug.patch)
-        patch_files = list(patches_path.glob(f"[0-9][0-9][0-9][0-9]-{repo_name}--*.patch"))
-        patch_files = sort_patch_files(patch_files)
+        patch_files = collect_patch_files(patch_dirs, repo_name)
         if not patch_files:
             continue
 
@@ -1729,8 +1756,8 @@ def main():
 
             target_issues = check_clone_and_branch(projects, name)
             target_issues.extend(check_expected_commits(projects, txt_file, name))
-            patches_dir = os.path.join(config.script_dir, "..", "patches")
-            target_issues.extend(check_patch_sync(projects, txt_file, patches_dir, name))
+            patch_dirs = resolve_patch_dirs(config.script_dir)
+            target_issues.extend(check_patch_sync(projects, txt_file, patch_dirs, name))
             target_issues.extend(check_submodule_sync(projects, name))
             all_issues.extend(target_issues)
 
@@ -1799,8 +1826,8 @@ def main():
             remote_url = modify_remote_url(remote_fetch, username)
             projects = parse_projects_from_xml(xml_file, remote_url, default_revision, username)
 
-            patches_dir = os.path.join(config.script_dir, "..", "patches")
-            apply_patches(projects, patches_dir, txt_file, applied_repos, force=args.force)
+            patch_dirs = resolve_patch_dirs(config.script_dir)
+            apply_patches(projects, patch_dirs, txt_file, applied_repos, force=args.force)
         sys.exit(0)
 
     if args.save is not None:
