@@ -29,8 +29,6 @@ int cvi_board_init(void)
         /* USB chrg */
         PINMUX_CONFIG(USB_VBUS_DET, XGPIOB_6);
 
-        /* 4G */
-        PINMUX_CONFIG(PWR_WAKEUP0, PWR_GPIO_6);         /* power source */
         PINMUX_CONFIG(SPK_EN, XGPIOA_15);               /* 4G_RESET_N */
 
         /* tp */

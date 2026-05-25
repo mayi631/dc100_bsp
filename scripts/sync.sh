@@ -72,7 +72,7 @@ sync_directory() {
 
     # 目标路径已存在时，先清理再创建软连接
     rm -rf "$target_path"
-    ln -s "$source_path" "$target_path"
+    ln -snf "$source_path" "$target_path"
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}$description 同步成功${NC}"
         return 0

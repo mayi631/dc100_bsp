@@ -98,6 +98,37 @@
 			linux,code = <KEY_POWER>;
 		};
 	};
+
+	battery_cell: battery {
+		compatible = "simple-battery";
+		voltage-min-design-microvolt = <3300000>;
+		voltage-max-design-microvolt = <4200000>;
+		charge-full-design-microamp-hours = <4081000>;
+		ocv-capacity-celsius = <25>;
+		ocv-capacity-table-0 = <4195600 100>, <4050800 99>,
+				       <4000500 96>, <3950200 83>,
+				       <3900300 72>, <3850100 66>,
+				       <3799900 60>, <3750200 52>,
+				       <3700700 46>, <3649600 39>,
+				       <3600300 34>, <3549700 28>,
+				       <3499900 21>, <3450000 15>,
+				       <3399400 9>, <3350300 4>,
+				       <3300000 0>;
+	};
+
+	adc_battery: battery-adc {
+		compatible = "cvitek,adc-simple-battery";
+		io-channels = <&saradc0 13>;
+		io-channel-names = "battery";
+		monitored-battery = <&battery_cell>;
+		poll-interval-ms = <3000>;
+		voltage-scale = <1025>;
+		voltage-filter-alpha-permil = <250>;
+		capacity-step-up-percent = <2>;
+		capacity-step-down-percent = <1>;
+		transient-drop-microvolt = <120000>;
+		transient-hold-ms = <3000>;
+	};
 };
 
 &wifisd{

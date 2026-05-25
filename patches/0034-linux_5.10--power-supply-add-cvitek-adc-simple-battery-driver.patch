@@ -1,0 +1,732 @@
+From 834f80ef4e705e3a7fc4815f1ad30b25030d432c Mon Sep 17 00:00:00 2001
+From: yogurt <yusong1117.u@gmail.com>
+Date: Fri, 27 Mar 2026 03:19:49 +0800
+Subject: [PATCH] feat(power): supply: add cvitek adc simple battery driver
+
+- add adc-simple-battery power_supply driver based on IIO ADC
+- support simple-battery monitored-battery OCV capacity mapping
+- support optional temperature ADC and charge-status GPIO
+- add DT binding for cvitek,adc-simple-battery
+- wire into Kconfig/Makefile
+
+Change-Id: Icff545f8f8cffee3f824e63d8d940c7c1d5032f6
+---
+ .../supply/cvitek,adc-simple-battery.yaml     | 131 +++++
+ drivers/power/supply/Kconfig                  |  10 +
+ drivers/power/supply/Makefile                 |   1 +
+ drivers/power/supply/adc-simple-battery.c     | 532 ++++++++++++++++++
+ 4 files changed, 674 insertions(+)
+ create mode 100644 Documentation/devicetree/bindings/power/supply/cvitek,adc-simple-battery.yaml
+ create mode 100644 drivers/power/supply/adc-simple-battery.c
+
+diff --git a/Documentation/devicetree/bindings/power/supply/cvitek,adc-simple-battery.yaml b/Documentation/devicetree/bindings/power/supply/cvitek,adc-simple-battery.yaml
+new file mode 100644
+index 000000000..ea76129a4
+--- /dev/null
++++ b/Documentation/devicetree/bindings/power/supply/cvitek,adc-simple-battery.yaml
+@@ -0,0 +1,131 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: "http://devicetree.org/schemas/power/supply/cvitek,adc-simple-battery.yaml#"
++$schema: "http://devicetree.org/meta-schemas/core.yaml#"
++
++title: CVITEK Simple ADC Battery
++
++maintainers:
++  - CVITEK Linux Team
++
++description: |
++  ADC based battery monitor driver. The driver samples battery voltage from IIO
++  and exposes battery properties through power_supply class. Capacity is derived
++  from simple-battery OCV tables when provided, otherwise a linear estimate from
++  voltage-min-design-microvolt to voltage-max-design-microvolt is used.
++
++properties:
++  compatible:
++    const: cvitek,adc-simple-battery
++
++  io-channels:
++    minItems: 1
++    maxItems: 2
++    description: |
++      ADC channels for battery voltage and optional battery temperature.
++
++  io-channel-names:
++    minItems: 1
++    maxItems: 2
++    items:
++      enum:
++        - battery
++        - temperature
++    description: |
++      Must include "battery". "temperature" is optional.
++
++  monitored-battery:
++    description: >
++      Phandle to a "simple-battery" node described by battery.yaml.
++
++  charge-status-gpios:
++    maxItems: 1
++    description: |
++      Optional GPIO indicating charging state. Active state means charging.
++      Use GPIO flags for polarity.
++
++  poll-interval-ms:
++    $ref: /schemas/types.yaml#/definitions/uint32
++    minimum: 100
++    maximum: 60000
++    default: 5000
++    description: Polling period for power_supply change notifications.
++
++  voltage-scale:
++    $ref: /schemas/types.yaml#/definitions/uint32
++    minimum: 1
++    default: 1000
++    description: |
++      Scale factor applied to ADC processed voltage:
++      voltage_uv = processed_value * voltage-scale / 1000.
++
++  voltage-filter-alpha-permil:
++    $ref: /schemas/types.yaml#/definitions/uint32
++    minimum: 1
++    maximum: 1000
++    default: 250
++    description: |
++      Exponential moving average factor for voltage filtering.
++      1000 means no filtering, lower values mean stronger filtering.
++
++  capacity-step-up-percent:
++    $ref: /schemas/types.yaml#/definitions/uint32
++    minimum: 0
++    maximum: 100
++    default: 2
++    description: Maximum allowed capacity increase per poll interval.
++
++  capacity-step-down-percent:
++    $ref: /schemas/types.yaml#/definitions/uint32
++    minimum: 0
++    maximum: 100
++    default: 1
++    description: Maximum allowed capacity decrease per poll interval.
++
++  transient-drop-microvolt:
++    $ref: /schemas/types.yaml#/definitions/uint32
++    default: 120000
++    description: |
++      Instant voltage drop threshold. A larger downward step than this value
++      is considered load transient and capacity drop can be held briefly.
++
++  transient-hold-ms:
++    $ref: /schemas/types.yaml#/definitions/uint32
++    minimum: 100
++    maximum: 60000
++    default: 3000
++    description: Hold time for transient-drop suppression.
++
++required:
++  - compatible
++  - io-channels
++  - io-channel-names
++
++additionalProperties: false
++
++examples:
++  - |
++    battery_cell: battery {
++      compatible = "simple-battery";
++      voltage-min-design-microvolt = <3300000>;
++      voltage-max-design-microvolt = <4200000>;
++      ocv-capacity-celsius = <25>;
++      ocv-capacity-table-0 = <4200000 100>, <4030000 80>,
++                             <3800000 40>, <3600000 15>, <3300000 0>;
++    };
++
++    adc-battery {
++      compatible = "cvitek,adc-simple-battery";
++      io-channels = <&saradc 3>, <&saradc 4>;
++      io-channel-names = "battery", "temperature";
++      monitored-battery = <&battery_cell>;
++      charge-status-gpios = <&gpio0 12 GPIO_ACTIVE_HIGH>;
++      poll-interval-ms = <3000>;
++      voltage-scale = <1000>;
++      voltage-filter-alpha-permil = <250>;
++      capacity-step-up-percent = <2>;
++      capacity-step-down-percent = <1>;
++      transient-drop-microvolt = <120000>;
++      transient-hold-ms = <3000>;
++    };
+diff --git a/drivers/power/supply/Kconfig b/drivers/power/supply/Kconfig
+index eec646c56..f6391337d 100644
+--- a/drivers/power/supply/Kconfig
++++ b/drivers/power/supply/Kconfig
+@@ -51,6 +51,16 @@ config GENERIC_ADC_BATTERY
+ 	  Say Y here to enable support for the generic battery driver
+ 	  which uses IIO framework to read adc.
+ 
++config BATTERY_ADC_SIMPLE
++	tristate "Simple ADC battery with OCV capacity lookup"
++	depends on OF && IIO
++	help
++	  Say Y here to enable a simple ADC based battery driver using
++	  the power_supply framework. The driver reads battery voltage
++	  from IIO, maps voltage to capacity using the simple-battery
++	  OCV table when available, and exposes battery properties via
++	  /sys/class/power_supply.
++
+ config MAX8925_POWER
+ 	tristate "MAX8925 battery charger support"
+ 	depends on MFD_MAX8925
+diff --git a/drivers/power/supply/Makefile b/drivers/power/supply/Makefile
+index dd4b86318..9883d1cea 100644
+--- a/drivers/power/supply/Makefile
++++ b/drivers/power/supply/Makefile
+@@ -8,6 +8,7 @@ power_supply-$(CONFIG_LEDS_TRIGGERS)	+= power_supply_leds.o
+ obj-$(CONFIG_POWER_SUPPLY)	+= power_supply.o
+ obj-$(CONFIG_POWER_SUPPLY_HWMON) += power_supply_hwmon.o
+ obj-$(CONFIG_GENERIC_ADC_BATTERY)	+= generic-adc-battery.o
++obj-$(CONFIG_BATTERY_ADC_SIMPLE)	+= adc-simple-battery.o
+ 
+ obj-$(CONFIG_PDA_POWER)		+= pda_power.o
+ obj-$(CONFIG_APM_POWER)		+= apm_power.o
+diff --git a/drivers/power/supply/adc-simple-battery.c b/drivers/power/supply/adc-simple-battery.c
+new file mode 100644
+index 000000000..41eda30fc
+--- /dev/null
++++ b/drivers/power/supply/adc-simple-battery.c
+@@ -0,0 +1,532 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Simple ADC battery driver
++ *
++ * Copyright (C) 2026 CVITEK
++ */
++
++#include <linux/gpio/consumer.h>
++#include <linux/iio/consumer.h>
++#include <linux/jiffies.h>
++#include <linux/kernel.h>
++#include <linux/limits.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/power_supply.h>
++#include <linux/property.h>
++#include <linux/workqueue.h>
++
++#define ASB_DEF_POLL_MS		5000
++#define ASB_VOLTAGE_HYST_UV	20000
++#define ASB_DEF_FILTER_ALPHA	250
++#define ASB_DEF_STEP_UP_PCT	2
++#define ASB_DEF_STEP_DOWN_PCT	1
++#define ASB_DEF_DROP_UV		120000
++#define ASB_DEF_DROP_HOLD_MS	3000
++
++struct asb_state {
++	int voltage_uv;
++	int capacity;
++	int status;
++	int temp_decic;
++};
++
++struct adc_simple_battery {
++	struct device *dev;
++	struct iio_channel *vbat_chan;
++	struct iio_channel *temp_chan;
++	struct gpio_desc *charge_status_gpiod;
++
++	struct power_supply_desc desc;
++	struct power_supply *psy;
++	struct power_supply_battery_info info;
++
++	struct delayed_work poll_work;
++	unsigned int poll_interval_ms;
++	unsigned int voltage_scale;
++	unsigned int filter_alpha_permil;
++	int cap_step_up_pct;
++	int cap_step_down_pct;
++	int transient_drop_uv;
++	unsigned int transient_hold_ms;
++	bool use_status_gpio;
++	bool has_temp_channel;
++	bool has_prev;
++	bool has_filtered_voltage;
++	bool has_smoothed_capacity;
++	bool state_valid;
++
++	unsigned long transient_hold_until;
++	int filtered_voltage_uv;
++	int smoothed_capacity;
++
++	struct mutex lock; /* Protect filter state and cached output state. */
++	struct asb_state state;
++	struct asb_state prev;
++};
++
++static int asb_read_voltage_uv(struct adc_simple_battery *asb, int *uv)
++{
++	int ret, raw;
++	s64 value;
++
++	ret = iio_read_channel_processed(asb->vbat_chan, &raw);
++	if (ret < 0)
++		return ret;
++
++	/* Most ADC battery channels report mV, while power_supply uses uV. */
++	value = raw;
++	if (abs(raw) < 20000)
++		value *= 1000;
++
++	value = div_s64(value * asb->voltage_scale, 1000);
++	*uv = clamp_t(int, value, 0, INT_MAX);
++
++	return 0;
++}
++
++static int asb_read_temp_decic(struct adc_simple_battery *asb, int *decic)
++{
++	int ret, raw;
++
++	if (!asb->has_temp_channel)
++		return -ENODATA;
++
++	ret = iio_read_channel_processed(asb->temp_chan, &raw);
++	if (ret < 0)
++		return ret;
++
++	/* POWER_SUPPLY_PROP_TEMP uses tenths of Celsius. */
++	if (abs(raw) > 1000)
++		*decic = raw / 100;
++	else
++		*decic = raw * 10;
++
++	return 0;
++}
++
++static int asb_capacity_level(int cap)
++{
++	if (cap <= 5)
++		return POWER_SUPPLY_CAPACITY_LEVEL_CRITICAL;
++	if (cap <= 15)
++		return POWER_SUPPLY_CAPACITY_LEVEL_LOW;
++	if (cap >= 95)
++		return POWER_SUPPLY_CAPACITY_LEVEL_FULL;
++	if (cap >= 80)
++		return POWER_SUPPLY_CAPACITY_LEVEL_HIGH;
++
++	return POWER_SUPPLY_CAPACITY_LEVEL_NORMAL;
++}
++
++static int asb_get_status(struct adc_simple_battery *asb, int cap)
++{
++	int charging;
++
++	if (asb->use_status_gpio) {
++		charging = gpiod_get_value_cansleep(asb->charge_status_gpiod);
++		if (charging < 0)
++			return POWER_SUPPLY_STATUS_UNKNOWN;
++	} else {
++		return POWER_SUPPLY_STATUS_UNKNOWN;
++	}
++
++	if (charging)
++		return cap >= 100 ? POWER_SUPPLY_STATUS_FULL :
++					  POWER_SUPPLY_STATUS_CHARGING;
++
++	return POWER_SUPPLY_STATUS_DISCHARGING;
++}
++
++static int asb_get_capacity(struct adc_simple_battery *asb,
++			    int voltage_uv, int temp_c)
++{
++	int cap;
++
++	cap = power_supply_batinfo_ocv2cap(&asb->info, voltage_uv, temp_c);
++	if (cap >= 0)
++		return clamp_t(int, cap, 0, 100);
++
++	if (asb->info.voltage_min_design_uv <= 0 ||
++	    asb->info.voltage_max_design_uv <= asb->info.voltage_min_design_uv)
++		return -EINVAL;
++
++	cap = (voltage_uv - asb->info.voltage_min_design_uv) * 100;
++	cap /= asb->info.voltage_max_design_uv - asb->info.voltage_min_design_uv;
++
++	return clamp_t(int, cap, 0, 100);
++}
++
++static int asb_filter_voltage_uv(struct adc_simple_battery *asb, int raw_uv)
++{
++	s64 filt;
++
++	if (!asb->has_filtered_voltage) {
++		asb->filtered_voltage_uv = raw_uv;
++		asb->has_filtered_voltage = true;
++		return raw_uv;
++	}
++
++	filt = (s64)asb->filter_alpha_permil * raw_uv;
++	filt += (s64)(1000 - asb->filter_alpha_permil) * asb->filtered_voltage_uv;
++	filt = div_s64(filt, 1000);
++
++	asb->filtered_voltage_uv = clamp_t(int, filt, 0, INT_MAX);
++	return asb->filtered_voltage_uv;
++}
++
++static int asb_filter_capacity(struct adc_simple_battery *asb,
++			       int raw_cap, int status,
++			       int raw_voltage_uv, int filtered_voltage_uv)
++{
++	int cap;
++	int delta_uv = 0;
++
++	if (raw_cap < 0)
++		return raw_cap;
++
++	if (!asb->has_smoothed_capacity) {
++		asb->smoothed_capacity = raw_cap;
++		asb->has_smoothed_capacity = true;
++		return raw_cap;
++	}
++
++	cap = raw_cap;
++	if (asb->has_prev)
++		delta_uv = asb->prev.voltage_uv - raw_voltage_uv;
++
++	if (status == POWER_SUPPLY_STATUS_DISCHARGING &&
++	    cap < asb->smoothed_capacity &&
++	    asb->has_prev &&
++	    delta_uv > 0 &&
++	    delta_uv >= asb->transient_drop_uv) {
++		asb->transient_hold_until =
++			jiffies + msecs_to_jiffies(asb->transient_hold_ms);
++	}
++
++	if (status == POWER_SUPPLY_STATUS_DISCHARGING &&
++	    cap < asb->smoothed_capacity &&
++	    time_before(jiffies, asb->transient_hold_until))
++		cap = asb->smoothed_capacity;
++
++	if (cap > asb->smoothed_capacity + asb->cap_step_up_pct)
++		cap = asb->smoothed_capacity + asb->cap_step_up_pct;
++	if (cap < asb->smoothed_capacity - asb->cap_step_down_pct)
++		cap = asb->smoothed_capacity - asb->cap_step_down_pct;
++
++	asb->smoothed_capacity = clamp_t(int, cap, 0, 100);
++	return asb->smoothed_capacity;
++}
++
++static int asb_sample_state(struct adc_simple_battery *asb, struct asb_state *st)
++{
++	int ret, temp_decic, temp_c;
++	int raw_cap;
++
++	ret = asb_read_voltage_uv(asb, &st->voltage_uv);
++	if (ret)
++		return ret;
++
++	ret = asb_read_temp_decic(asb, &temp_decic);
++	if (ret) {
++		st->temp_decic = 250;
++		temp_c = 25;
++	} else {
++		st->temp_decic = temp_decic;
++		temp_c = temp_decic / 10;
++	}
++
++	raw_cap = asb_get_capacity(asb, st->voltage_uv, temp_c);
++	st->capacity = raw_cap;
++	st->status = asb_get_status(asb, raw_cap >= 0 ? raw_cap : 0);
++
++	return 0;
++}
++
++static int asb_refresh_state_locked(struct adc_simple_battery *asb,
++				    struct asb_state *st)
++{
++	struct asb_state raw;
++	int ret;
++
++	ret = asb_sample_state(asb, &raw);
++	if (ret)
++		return ret;
++
++	st->voltage_uv = asb_filter_voltage_uv(asb, raw.voltage_uv);
++	st->temp_decic = raw.temp_decic;
++	st->capacity = asb_filter_capacity(asb, raw.capacity, raw.status,
++					   raw.voltage_uv, st->voltage_uv);
++	st->status = asb_get_status(asb, st->capacity >= 0 ? st->capacity : 0);
++
++	asb->state = *st;
++	asb->state_valid = true;
++
++	return 0;
++}
++
++static int asb_get_property(struct power_supply *psy,
++			    enum power_supply_property psp,
++			    union power_supply_propval *val)
++{
++	struct adc_simple_battery *asb = power_supply_get_drvdata(psy);
++	struct asb_state st;
++
++	mutex_lock(&asb->lock);
++	if (!asb->state_valid) {
++		mutex_unlock(&asb->lock);
++		return -EAGAIN;
++	}
++	st = asb->state;
++	mutex_unlock(&asb->lock);
++
++	switch (psp) {
++	case POWER_SUPPLY_PROP_STATUS:
++		val->intval = st.status;
++		return 0;
++	case POWER_SUPPLY_PROP_PRESENT:
++		val->intval = st.voltage_uv > 0;
++		return 0;
++	case POWER_SUPPLY_PROP_HEALTH:
++		if (asb->info.voltage_max_design_uv > 0 &&
++		    st.voltage_uv > asb->info.voltage_max_design_uv)
++			val->intval = POWER_SUPPLY_HEALTH_OVERVOLTAGE;
++		else if (asb->info.voltage_min_design_uv > 0 &&
++			 st.voltage_uv < asb->info.voltage_min_design_uv)
++			val->intval = POWER_SUPPLY_HEALTH_DEAD;
++		else
++			val->intval = POWER_SUPPLY_HEALTH_GOOD;
++		return 0;
++	case POWER_SUPPLY_PROP_CAPACITY:
++		if (st.capacity < 0)
++			return -ENODATA;
++		val->intval = st.capacity;
++		return 0;
++	case POWER_SUPPLY_PROP_CAPACITY_LEVEL:
++		if (st.capacity < 0)
++			return -ENODATA;
++		val->intval = asb_capacity_level(st.capacity);
++		return 0;
++	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
++	case POWER_SUPPLY_PROP_VOLTAGE_OCV:
++		val->intval = st.voltage_uv;
++		return 0;
++	case POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN:
++		if (asb->info.voltage_min_design_uv < 0)
++			return -ENODATA;
++		val->intval = asb->info.voltage_min_design_uv;
++		return 0;
++	case POWER_SUPPLY_PROP_VOLTAGE_MAX_DESIGN:
++		if (asb->info.voltage_max_design_uv < 0)
++			return -ENODATA;
++		val->intval = asb->info.voltage_max_design_uv;
++		return 0;
++	case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
++		if (asb->info.charge_full_design_uah < 0)
++			return -ENODATA;
++		val->intval = asb->info.charge_full_design_uah;
++		return 0;
++	case POWER_SUPPLY_PROP_TEMP:
++		if (!asb->has_temp_channel)
++			return -ENODATA;
++		val->intval = st.temp_decic;
++		return 0;
++	default:
++		return -EINVAL;
++	}
++}
++
++static enum power_supply_property asb_props[] = {
++	POWER_SUPPLY_PROP_STATUS,
++	POWER_SUPPLY_PROP_PRESENT,
++	POWER_SUPPLY_PROP_HEALTH,
++	POWER_SUPPLY_PROP_CAPACITY,
++	POWER_SUPPLY_PROP_CAPACITY_LEVEL,
++	POWER_SUPPLY_PROP_VOLTAGE_NOW,
++	POWER_SUPPLY_PROP_VOLTAGE_OCV,
++	POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN,
++	POWER_SUPPLY_PROP_VOLTAGE_MAX_DESIGN,
++	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN,
++	POWER_SUPPLY_PROP_TEMP,
++};
++
++static void asb_poll_workfn(struct work_struct *work)
++{
++	struct adc_simple_battery *asb =
++		container_of(to_delayed_work(work), struct adc_simple_battery,
++			     poll_work);
++	struct asb_state cur;
++	bool changed = false;
++
++	mutex_lock(&asb->lock);
++	if (!asb_refresh_state_locked(asb, &cur)) {
++		if (!asb->has_prev) {
++			changed = true;
++		} else if (cur.status != asb->prev.status ||
++			   cur.capacity != asb->prev.capacity ||
++			   abs(cur.voltage_uv - asb->prev.voltage_uv) >=
++				   ASB_VOLTAGE_HYST_UV ||
++			   (asb->has_temp_channel &&
++			    cur.temp_decic != asb->prev.temp_decic)) {
++			changed = true;
++		}
++
++		asb->prev = cur;
++		asb->has_prev = true;
++	}
++	mutex_unlock(&asb->lock);
++
++	if (changed)
++		power_supply_changed(asb->psy);
++
++	schedule_delayed_work(&asb->poll_work,
++			      msecs_to_jiffies(asb->poll_interval_ms));
++}
++
++static int asb_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct adc_simple_battery *asb;
++	struct power_supply_config psy_cfg = {};
++	struct asb_state init;
++	u32 tmp;
++	int ret;
++
++	asb = devm_kzalloc(dev, sizeof(*asb), GFP_KERNEL);
++	if (!asb)
++		return -ENOMEM;
++
++	asb->dev = dev;
++	mutex_init(&asb->lock);
++
++	asb->vbat_chan = devm_iio_channel_get(dev, "battery");
++	if (IS_ERR(asb->vbat_chan))
++		return dev_err_probe(dev, PTR_ERR(asb->vbat_chan),
++				     "failed to get battery channel\n");
++
++	asb->temp_chan = devm_iio_channel_get(dev, "temperature");
++	if (IS_ERR(asb->temp_chan)) {
++		if (PTR_ERR(asb->temp_chan) == -ENODEV ||
++		    PTR_ERR(asb->temp_chan) == -ENXIO) {
++			asb->temp_chan = NULL;
++		} else {
++			return dev_err_probe(dev, PTR_ERR(asb->temp_chan),
++					     "failed to get temperature channel\n");
++		}
++	}
++	asb->has_temp_channel = !!asb->temp_chan;
++
++	asb->charge_status_gpiod =
++		devm_gpiod_get_optional(dev, "charge-status", GPIOD_IN);
++	if (IS_ERR(asb->charge_status_gpiod))
++		return dev_err_probe(dev, PTR_ERR(asb->charge_status_gpiod),
++				     "failed to get charge-status gpio\n");
++	asb->use_status_gpio = !!asb->charge_status_gpiod;
++
++	asb->voltage_scale = 1000;
++	ret = device_property_read_u32(dev, "voltage-scale", &tmp);
++	if (!ret) {
++		if (!tmp)
++			return dev_err_probe(dev, -EINVAL,
++					     "voltage-scale must be > 0\n");
++		asb->voltage_scale = tmp;
++	}
++
++	asb->poll_interval_ms = ASB_DEF_POLL_MS;
++	ret = device_property_read_u32(dev, "poll-interval-ms", &tmp);
++	if (!ret && tmp >= 100)
++		asb->poll_interval_ms = tmp;
++
++	asb->filter_alpha_permil = ASB_DEF_FILTER_ALPHA;
++	ret = device_property_read_u32(dev, "voltage-filter-alpha-permil", &tmp);
++	if (!ret && tmp > 0 && tmp <= 1000)
++		asb->filter_alpha_permil = tmp;
++
++	asb->cap_step_up_pct = ASB_DEF_STEP_UP_PCT;
++	ret = device_property_read_u32(dev, "capacity-step-up-percent", &tmp);
++	if (!ret && tmp <= 100)
++		asb->cap_step_up_pct = tmp;
++
++	asb->cap_step_down_pct = ASB_DEF_STEP_DOWN_PCT;
++	ret = device_property_read_u32(dev, "capacity-step-down-percent", &tmp);
++	if (!ret && tmp <= 100)
++		asb->cap_step_down_pct = tmp;
++
++	asb->transient_drop_uv = ASB_DEF_DROP_UV;
++	ret = device_property_read_u32(dev, "transient-drop-microvolt", &tmp);
++	if (!ret)
++		asb->transient_drop_uv = min_t(u32, tmp, INT_MAX);
++
++	asb->transient_hold_ms = ASB_DEF_DROP_HOLD_MS;
++	ret = device_property_read_u32(dev, "transient-hold-ms", &tmp);
++	if (!ret && tmp >= 100)
++		asb->transient_hold_ms = tmp;
++
++	asb->desc.name = dev_name(dev);
++	asb->desc.type = POWER_SUPPLY_TYPE_BATTERY;
++	asb->desc.properties = asb_props;
++	asb->desc.num_properties = ARRAY_SIZE(asb_props);
++	asb->desc.get_property = asb_get_property;
++
++	psy_cfg.drv_data = asb;
++	psy_cfg.of_node = dev->of_node;
++
++	asb->psy = devm_power_supply_register(dev, &asb->desc, &psy_cfg);
++	if (IS_ERR(asb->psy))
++		return dev_err_probe(dev, PTR_ERR(asb->psy),
++				     "failed to register power supply\n");
++
++	ret = power_supply_get_battery_info(asb->psy, &asb->info);
++	if (ret)
++		dev_warn(dev,
++			 "simple-battery info missing, fallback to linear capacity\n");
++
++	platform_set_drvdata(pdev, asb);
++
++	mutex_lock(&asb->lock);
++	ret = asb_refresh_state_locked(asb, &init);
++	if (!ret) {
++		asb->prev = init;
++		asb->has_prev = true;
++	}
++	mutex_unlock(&asb->lock);
++	if (ret)
++		dev_warn(dev, "failed to sample initial battery state: %d\n", ret);
++
++	INIT_DELAYED_WORK(&asb->poll_work, asb_poll_workfn);
++	schedule_delayed_work(&asb->poll_work, msecs_to_jiffies(0));
++
++	return 0;
++}
++
++static int asb_remove(struct platform_device *pdev)
++{
++	struct adc_simple_battery *asb = platform_get_drvdata(pdev);
++
++	cancel_delayed_work_sync(&asb->poll_work);
++	power_supply_put_battery_info(asb->psy, &asb->info);
++
++	return 0;
++}
++
++static const struct of_device_id asb_of_match[] = {
++	{ .compatible = "cvitek,adc-simple-battery" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, asb_of_match);
++
++static struct platform_driver asb_driver = {
++	.driver = {
++		.name = "adc-simple-battery",
++		.of_match_table = asb_of_match,
++	},
++	.probe = asb_probe,
++	.remove = asb_remove,
++};
++module_platform_driver(asb_driver);
++
++MODULE_DESCRIPTION("Simple ADC battery driver");
++MODULE_AUTHOR("CVITEK");
++MODULE_LICENSE("GPL");
+-- 
+2.25.1
+

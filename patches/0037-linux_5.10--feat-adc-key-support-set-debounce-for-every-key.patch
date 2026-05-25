@@ -1,0 +1,92 @@
+From 81d4a45eb5ac23db9f2d66c4b738011fe3bb03f4 Mon Sep 17 00:00:00 2001
+From: "song.yu" <song.yu@sophgo.com>
+Date: Sun, 4 Jan 2026 13:45:13 +0800
+Subject: [PATCH] feat: adc-key support set debounce for every key
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+不同按键可设置不同的去抖动时间
+---
+ drivers/input/keyboard/adc-keys.c | 23 +++++++++--------------
+ 1 file changed, 9 insertions(+), 14 deletions(-)
+
+diff --git a/drivers/input/keyboard/adc-keys.c b/drivers/input/keyboard/adc-keys.c
+index cd2768e87..a0db05488 100644
+--- a/drivers/input/keyboard/adc-keys.c
++++ b/drivers/input/keyboard/adc-keys.c
+@@ -19,6 +19,7 @@
+ struct adc_keys_button {
+ 	u32 voltage;
+ 	u32 keycode;
++	u32 debounce_steps;
+ };
+ 
+ struct adc_keys_state {
+@@ -29,7 +30,6 @@ struct adc_keys_state {
+ 	const struct adc_keys_button *map;
+ 
+ 	/* support debounce */
+-	u32 debounce_steps;
+ 	u32 stable_cnt;
+ 	u32 candidate_key;
+ };
+@@ -39,7 +39,7 @@ static void adc_keys_poll(struct input_dev *input)
+ 	struct adc_keys_state *st = input_get_drvdata(input);
+ 	int i, value, ret;
+ 	u32 diff, closest = 0xffffffff;
+-	u32 keycode = 0;
++	u32 keycode = 0, candidate_debounce = 1;
+ 
+ 	ret = iio_read_channel_processed(st->channel, &value);
+ 	if (unlikely(ret < 0)) {
+@@ -51,6 +51,7 @@ static void adc_keys_poll(struct input_dev *input)
+ 			if (diff < closest) {
+ 				closest = diff;
+ 				keycode = st->map[i].keycode;
++				candidate_debounce = st->map[i].debounce_steps;
+ 			}
+ 		}
+ 	}
+@@ -66,7 +67,7 @@ static void adc_keys_poll(struct input_dev *input)
+ 		st->stable_cnt = 1;
+ 	}
+ 
+-	if (st->stable_cnt >= st->debounce_steps) {
++	if (st->stable_cnt >= candidate_debounce) {
+ 		if (st->last_key != st->candidate_key) {
+ 			/* release previous key */
+ 			if (st->last_key)
+@@ -115,6 +116,11 @@ static int adc_keys_load_keymap(struct device *dev, struct adc_keys_state *st)
+ 			return -EINVAL;
+ 		}
+ 
++		/* default debounce steps is 1 */
++		map[i].debounce_steps = 1;
++		fwnode_property_read_u32(child, "debounce-steps",
++					 &map[i].debounce_steps);
++
+ 		i++;
+ 	}
+ 
+@@ -135,17 +141,6 @@ static int adc_keys_probe(struct platform_device *pdev)
+ 	if (!st)
+ 		return -ENOMEM;
+ 
+-	st->debounce_steps = 1; /*default 1, compatible with old configs */
+-	if (device_property_read_u32(dev, "debounce-steps",
+-				     &st->debounce_steps)) {
+-		dev_dbg(dev, "debounce-steps not found, using default=%u\n",
+-			st->debounce_steps);
+-	}
+-	if (st->debounce_steps > 5) {
+-		dev_warn(dev, "debounce-steps:%u, may lead to high latency!\n",
+-			 st->debounce_steps);
+-	}
+-
+ 	st->channel = devm_iio_channel_get(dev, "buttons");
+ 	if (IS_ERR(st->channel))
+ 		return PTR_ERR(st->channel);
+-- 
+2.25.1
+

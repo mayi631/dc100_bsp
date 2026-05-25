@@ -208,28 +208,29 @@ static void i2c1_recovery_config(void)
 	csi_iic_set_recovery_config(1, &i2c1_recovery);
 }
 
-/* RTC 唤醒源设定
- * AI相机项目中，RTC唤醒源为 PWR_BUTTON1, PWR_WAKEUP0
+/* RTC 唤醒源、强制重启配置
+ * DC100 项目中，RTC唤醒源为 PWR_WAKEUP0，
+ * PWR_BUTTON1 作为电源键，短按 PWR_BUTTON1 可强制重启。
  */
 void rtc_wakeup_config(void)
 {
-	/* 唤醒源设定 */
+	/* pinmux 设置 */
+	mmio_write_32(0x05027084, 1); // 解除 pinmux 锁定，PWR_BUTTON1
+	mmio_write_32(0x0502708c, 1); // 解除 pinmux 锁定，PWR_WAKEUP0
 	mmio_write_32(0x03001098, 0); // 切pinmux为 PWR_BUTTON1
 	mmio_write_32(0x03001090, 0); // 切pinmux为 PWR_WAKEUP0
-
-	mmio_write_32(0x05027084, 0); // 锁定pinmux为 PWR_BUTTON1
-	mmio_write_32(0x0502708c, 0); // 锁定pinmux为 PWR_WAKEUP0，防止poweroff时被重置
+	mmio_write_32(0x05027084, 0); // 锁定 pinmux，PWR_BUTTON1
+	mmio_write_32(0x0502708c, 0); // 锁定 pinmux，PWR_WAKEUP0
 
 	mmio_write_32(0x050250ac, 0x2); // 设定 poweroff 时 rtc 不复位
 	mmio_write_32(0x050260d0, 0x3); // 不自动开机
-	mmio_write_32(0x050260bc, 0x1100); // RTC_EN_PWR_WAKEUP 设定唤醒源为 PWR_BUTTON1、PWR_WAKEUP0
-	// 设定触发模式，PWR_BUTTON1 为低电平触发，
+	mmio_write_32(0x050260bc, 0x100); // RTC_EN_PWR_WAKEUP 设定唤醒源为 PWR_WAKEUP0
 	// PWR_WAKEUP0 为上升沿触发（默认是高电平触发，会导致poweroff下去，立马又开机）
 	mmio_write_32(0x0502606c, 0x16);
 
 	/* 强制重启功能 */
 	mmio_write_32(0x05026004, 0x800000); // 这个默认值就是0x800000，但不设定一下，又起不来。
-	mmio_write_32(0x05026050, 0xdc780000); // 设定长按时间，2s
+	mmio_write_32(0x05026050, 0xdc780001); // 设定长按 PWR_BUTTON1 reset 去抖动时间，1s
 	mmio_write_32(0x050260b8, 0xdc78000b); // 使能强制重启功能
 }
 

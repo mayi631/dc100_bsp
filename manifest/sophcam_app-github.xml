@@ -4,7 +4,6 @@
     <default revision="master" remote="origin" sync-j="4"/>
 
     <project name="sophcam" path="sophcam" revision="dc100" soft_link="no"/>
-    <project name="AIsdk" path="sophcam/components/AIsdk" revision="dc100" soft_link="no"/>
     <project name="comps_install" path="sophcam/components/comps_install" revision="dc100" soft_link="no"/>
     <project name="common_files" path="sophcam/common_files" soft_link="no"/>
     <project name="lvgl" path="sophcam/oss/lvgl" revision="release/v9.3" soft_link="no"/>
