@@ -1,80 +1,23 @@
 project_name: sophcam
-commit_id: 40655427411f79088558e2ee9af36d9f29c06d83 feat:add dc100 config and pipeline
+commit_id: 67da30618bcd1f98a8b03aca412b3377acc871d1 Revert "fix:disable sbm when record"
 
-project_name: turnkey
-commit_id: 14e8f8f9774ee2f775152642776f621ca1a29147 [fix](file-dir):fix file dir [description ]:NA [root   cause]:NA [JIRA      ID]:CV184XSDK-760 [chip project]:NA [side effects]:NA [Affected *.ko/*.so/*.a] :NA
-
-project_name: lvgl
-commit_id: 9f27e0a51e80430f1491b0e0cac4a07eb3995b58 [clena] rm lv_conf.h
-
-project_name: AIsdk
-commit_id: b587bb3c95470e0121fb3e8f6414a60b191f7f44 Merge "feat: 增加 img2img_cancel 接口"
+project_name: comps_install
+commit_id: 3c5e537c5596f4821753d57c3f81eea712f8f899 fix:sync muxer and recorder'libs
 
 project_name: common_files
 commit_id: 4be0f1e27f22445c11be837dcfaf4be87b8389d8 [refactor] sync log level
 
-project_name: osal
-commit_id: 00f3bc3f666384f57fe2cfeb2212f885d5ff572f [fix](warning) build warning, size not match
-
-project_name: hal
-commit_id: 921ef045b925d743299ca1d5893db557ea6deef1 fix:set watchdog timeout error
-
-project_name: rtsp
-commit_id: f6a7426e275080dd482be7c33647e09a3b330c4b [fix]Resolve the deadlock issue caused by send blocking due to abnormal RTSP exit.
-
-project_name: demuxer
-commit_id: e42b46b0bdff12c96a66cf7d1365a8f265b7256f [refactor] add FFmpeg include path
-
-project_name: file_recover
-commit_id: 48a26c39b1a708d609f1373194d5731d0b0e8515 [fix]录像文件有多个缩略图，解析文件时不能只有一次
-
-project_name: mapi
-commit_id: 36809700ded96197bf482f30162aea104825eee3 [fix]chn enable
-
-project_name: muxer
-commit_id: 2052088b5ec0c0c3a869f0188290cb44efd073b2 [refactor] add FFmpeg include path
-
-project_name: player
-commit_id: 11e642fa1ed83f71662de99a80dcf033af3fbbd7 [refactor] add FFmpeg include path
-
-project_name: recorder
-commit_id: 0b615c5375acc9ce9841e5be4ec65f7e860e2802 fix:outcnt is error when enable_emrfile_from_normfile
-
-project_name: ringbuffer
-commit_id: c440e79e058d34b695898ebf6937eb5bdf0aad5c fix:add RBUF_Unused to log and some comments
-
-project_name: thumbnail_extractor
-commit_id: 0dca4dd7487aee20f80a754caa2823bb708ba991 [feat]support generate subpic from subvideo
-
-project_name: upgrade
-commit_id: c6e4f642c276898bcc4c349a528ba57af8a00713 [feat]Add cmake build flow.
-
-project_name: sysutils
-commit_id: b9c15115ff26cd0f05e2ab5645417a883be99e90 [refactor] using CVI_LOGX instead of printf
-
-project_name: perf
-commit_id: fe87dac5612ae918042b1b07ab02dbc6c16c13d5 [feat]Add cmake build flow.
-
-project_name: dtcf
-commit_id: b3e546c19c24cb8b9a74e3047bd7ba2a282a51ea [fix]put the newest file on the head of list
-
-project_name: exif
-commit_id: b099a5d3cdbcf2dfa2ae429fef473cefc1350ac6 [feat]add sample
-
-project_name: storage
-commit_id: 79d1b24f2902196bc7b6e7ade7c27be00568a3c0 fix: check sd card statue before getfsinfo
-
-project_name: ini
-commit_id: 6c48b5dd95bcc3995cd9378ef1174303a7758405 [feat]add sample
-
-project_name: flash_tool
-commit_id: 112c6e4f8873b05ff041fb7927343769a8770cb9 [fix]Remove rls_info.txt
+project_name: lvgl
+commit_id: 9f27e0a51e80430f1491b0e0cac4a07eb3995b58 [clena] rm lv_conf.h
 
 project_name: ffmpeg
 commit_id: a45854861fd10cda0df39c1d21c3f166ba9b2dd4 [feat] add flush moov box for mp4 files
 
-project_name: awtkcode
-commit_id: 4a49328ea559d672de0c79ab92d9718ad0ca3cb7 [feat]fb enable tde
-
 project_name: thttpd
 commit_id: 1b660b0b05c1f8f3c0d450e13bb82cc0f46da890 [style]delete cvi for thttpd
+
+project_name: turnkey
+commit_id: 14e8f8f9774ee2f775152642776f621ca1a29147 [fix](file-dir):fix file dir [description ]:NA [root   cause]:NA [JIRA      ID]:CV184XSDK-760 [chip project]:NA [side effects]:NA [Affected *.ko/*.so/*.a] :NA
+
+project_name: dc100
+commit_id: fd0eff1ab384dc1ddf168c58505eb1e6362e1049 fix:fix build error
