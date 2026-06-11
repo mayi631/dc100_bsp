@@ -25,6 +25,7 @@ from email.utils import parseaddr
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple, Set
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 # 初始化 colorama 以支持彩色输出
 colorama.init(autoreset=True)
@@ -155,6 +156,23 @@ class RepoProject:
     def folder_name(self) -> str:
         """获取本地文件夹名称（path 的最后一部分）"""
         return self.path.split("/")[-1]
+
+    @property
+    def save_name(self) -> str:
+        """获取版本文件里使用的标准仓库名（name 的最后一部分）"""
+        return self.name.split("/")[-1]
+
+    @property
+    def txt_names(self) -> list:
+        """按优先级返回版本文件里可能出现的仓库名。"""
+        candidates = [self.save_name, self.name, self.folder_name, self.path]
+        seen = set()
+        ordered = []
+        for item in candidates:
+            if item and item not in seen:
+                seen.add(item)
+                ordered.append(item)
+        return ordered
 
     @property
     def clone_url(self) -> str:
@@ -373,30 +391,47 @@ def parse_projects_from_xml(xml_file: str, remote_url: str, default_revision: st
     return projects
 
 
-def get_commit_id_from_txt(project_name: str, txt_file: str) -> Optional[str]:
-    """从文本文件中提取项目的提交 ID"""
+@lru_cache(maxsize=32)
+def _load_commit_index(txt_file: str) -> dict:
+    """加载版本文件中的 project_name -> commit_id 索引。"""
+    index = {}
+    current_project = None
+
     try:
-        with open(txt_file, 'r') as f:
-            content = f.read()
+        with open(txt_file, 'r', encoding='utf-8', errors='ignore') as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line:
+                    continue
 
-        # 模式：使用 ^ 锚定行首，确保精确匹配项目名
-        # project_name 后面必须是空格、换行或字符串结尾
-        pattern = rf'^project_name:\s*{re.escape(project_name)}(\s|$)'
-        match = re.search(pattern, content, re.MULTILINE)
-        if not match:
-            return None
+                match = re.match(r'^project_name:\s*(.+?)\s*$', line)
+                if match:
+                    current_project = match.group(1)
+                    continue
 
-        # 找到匹配行后，在该行内查找 commit_id
-        line_start = content.rfind('\n', 0, match.start()) + 1 if '\n' in content[:match.start()] else 0
-        line_end = content.find('\n', match.end())
-        if line_end == -1:
-            line_end = len(content)
-
-        line = content[line_start:line_end]
-        commit_match = re.search(r'commit_id:\s*(\w+)', line)
-        return commit_match.group(1) if commit_match else None
+                match = re.match(r'^commit_id:\s*([0-9a-fA-F]+)', line)
+                if match and current_project:
+                    commit_id = match.group(1)
+                    index[current_project] = commit_id
+                    index.setdefault(current_project.lower(), commit_id)
+                    current_project = None
     except FileNotFoundError:
-        return None
+        pass
+
+    return index
+
+
+def get_commit_id_from_txt(project: RepoProject, txt_file: str) -> Optional[str]:
+    """从文本文件中提取项目的提交 ID。"""
+    commit_index = _load_commit_index(txt_file)
+    for project_name in project.txt_names:
+        commit_id = commit_index.get(project_name)
+        if commit_id:
+            return commit_id
+        commit_id = commit_index.get(project_name.lower())
+        if commit_id:
+            return commit_id
+    return None
 
 
 def sort_patch_files(patch_files: List[Path]) -> List[Path]:
@@ -869,11 +904,8 @@ def build_clone_batches(projects: List[RepoProject]) -> List[List[RepoProject]]:
 
 def reproduce_repo(project: RepoProject, txt_file: str):
     """复现仓库到指定提交"""
-    # 优先使用 name 查找，因为 txt 中通常记录完整的仓库名
-    commit_id = get_commit_id_from_txt(project.name, txt_file)
-    # 如果找不到，尝试使用 folder_name（某些 txt 可能使用文件夹名）
-    if not commit_id:
-        commit_id = get_commit_id_from_txt(project.folder_name, txt_file)
+    # 使用统一的项目别名查找，避免 name/path/folder_name 混用
+    commit_id = get_commit_id_from_txt(project, txt_file)
 
     if not commit_id:
         print(f"警告: 未找到 {project.name} 的提交 ID")
@@ -958,12 +990,12 @@ def save_commit_ids(projects: List[RepoProject], txt_file: str):
         )
         commit_msg = result.stdout.strip() if result.returncode == 0 else ""
 
-        folder_name = project.folder_name
-        lines.append(f"project_name: {folder_name}")
+        save_name = project.save_name
+        lines.append(f"project_name: {save_name}")
         lines.append(f"commit_id: {commit_id} {commit_msg}")
         lines.append("")
 
-        print(f"  ✓ {folder_name}: {commit_id[:8]} ({commit_ref[:12] if commit_ref != 'HEAD' else 'HEAD'})")
+        print(f"  ✓ {save_name}: {commit_id[:8]} ({commit_ref[:12] if commit_ref != 'HEAD' else 'HEAD'})")
 
     # 写入文件
     with open(txt_path, 'w', encoding='utf-8') as f:
@@ -985,9 +1017,7 @@ def check_commit_id(project: RepoProject, txt_file: str):
         return
 
     # 获取 txt 中记录的 commit_id
-    expected_commit = get_commit_id_from_txt(project.name, txt_file)
-    if not expected_commit:
-        expected_commit = get_commit_id_from_txt(project.folder_name, txt_file)
+    expected_commit = get_commit_id_from_txt(project, txt_file)
 
     if not expected_commit:
         print(config.colored(f"错误: 未找到 {project.name} 的 commit_id", Colors.RED))
@@ -1183,9 +1213,7 @@ def check_expected_commits(projects: List[RepoProject], txt_file: str, target_na
         if not path.exists() or not (path / ".git").exists():
             continue
 
-        expected_commit = get_commit_id_from_txt(project.name, txt_file)
-        if not expected_commit:
-            expected_commit = get_commit_id_from_txt(project.folder_name, txt_file)
+        expected_commit = get_commit_id_from_txt(project, txt_file)
 
         if not expected_commit:
             issues.append(f"{label}: txt 未找到对应 commit_id 记录")
@@ -1231,9 +1259,7 @@ def check_patch_sync(projects: List[RepoProject], txt_file: str, patch_dirs: Lis
         if not path.exists() or not (path / ".git").exists():
             continue
 
-        expected_commit = get_commit_id_from_txt(project.name, txt_file)
-        if not expected_commit:
-            expected_commit = get_commit_id_from_txt(project.folder_name, txt_file)
+        expected_commit = get_commit_id_from_txt(project, txt_file)
         if not expected_commit:
             # commit 映射问题由 check_expected_commits 输出
             continue
@@ -1447,9 +1473,7 @@ def apply_patches(projects: List[RepoProject], patch_dirs: List[Path], txt_file:
 
         # 获取期望的提交
         # 优先使用 name 查找，因为 txt 中可能记录完整的仓库名
-        expected_commit = get_commit_id_from_txt(project.name, str(txt_file))
-        if not expected_commit:
-            expected_commit = get_commit_id_from_txt(repo_name, str(txt_file))
+        expected_commit = get_commit_id_from_txt(project, str(txt_file))
         if not expected_commit:
             continue
 

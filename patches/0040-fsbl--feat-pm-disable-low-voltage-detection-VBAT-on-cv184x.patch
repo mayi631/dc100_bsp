@@ -1,0 +1,37 @@
+From 977076cd556020d0b98e7102963c0927a9a08804 Mon Sep 17 00:00:00 2001
+From: "xiu.yang" <xiu.yang@sophgo.com>
+Date: Thu, 11 Jun 2026 12:33:30 +0800
+Subject: [PATCH] feat(pm): disable low voltage detection (VBAT) on cv184x
+
+Write RTC_EN_PWR_VBAT_DET register (0x050260D0) to 0 to fully disable
+low voltage detection, replacing the previous BIT(2) clear-only approach.
+
+[description]: Disable low voltage detection on 184x platform
+[root cause]: Low voltage detection needs to be fully disabled
+[JIRA ID]: NA
+[chip project]: cv184x
+[side effects]: NA
+[Affected *.ko/*.so/*.a]: NA
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+Change-Id: I2a3b07ee986d4298a39bf11ce4e1f2399eae5ae2
+---
+ plat/cvitek/cv184x/common/cv_bl2_setup.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/plat/cvitek/cv184x/common/cv_bl2_setup.c b/plat/cvitek/cv184x/common/cv_bl2_setup.c
+index 5d317b7..88f415d 100644
+--- a/plat/cvitek/cv184x/common/cv_bl2_setup.c
++++ b/plat/cvitek/cv184x/common/cv_bl2_setup.c
+@@ -475,7 +475,7 @@ void set_rtc_en_registers(void)
+ 	mmio_write_32(REG_RTC_CTRL_BASE + RTC_CTRL0, write_data);
+ 
+ 	// Avoid power up again after poweroff
+-	mmio_clrbits_32(REG_RTC_BASE + RTC_EN_PWR_VBAT_DET, BIT(2));
++	mmio_write_32(REG_RTC_BASE + RTC_EN_PWR_VBAT_DET, 0);
+ }
+ 
+ #if defined(RTOS_ENABLE_FREERTOS) || defined(RTOS_ENABLE_RTT)
+-- 
+2.25.1
+

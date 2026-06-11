@@ -1,8 +1,8 @@
 project_name: sophcam
-commit_id: 67da30618bcd1f98a8b03aca412b3377acc871d1 Revert "fix:disable sbm when record"
+commit_id: aa1f9cc7dd59c4699dffe12f6efa2e717b863d5e feat:use battery cell
 
 project_name: comps_install
-commit_id: 3c5e537c5596f4821753d57c3f81eea712f8f899 fix:sync muxer and recorder'libs
+commit_id: 7426ac91c35f7d32d587f30df75a42de18ab2a4e fix:avoid non-monotonically increasing dts in audio muxing
 
 project_name: common_files
 commit_id: 4be0f1e27f22445c11be837dcfaf4be87b8389d8 [refactor] sync log level
@@ -20,4 +20,4 @@ project_name: turnkey
 commit_id: 14e8f8f9774ee2f775152642776f621ca1a29147 [fix](file-dir):fix file dir [description ]:NA [root   cause]:NA [JIRA      ID]:CV184XSDK-760 [chip project]:NA [side effects]:NA [Affected *.ko/*.so/*.a] :NA
 
 project_name: dc100
-commit_id: fd0eff1ab384dc1ddf168c58505eb1e6362e1049 fix:fix build error
+commit_id: 1aad587d95c0c9e5e915eaeed48e84d97df9c68f fix:fix some UI bug
