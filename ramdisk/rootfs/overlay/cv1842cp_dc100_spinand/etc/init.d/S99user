@@ -51,7 +51,8 @@ case "$1" in
 
         # run wpa_supplicant after app start
         wpa_supplicant -D nl80211 -i wlan0 -c /etc/wpa_supplicant.conf -B
-        ifconfig wlan0 down
+        # ifconfig wlan0 down
+	wifi-daemon -l info | logger -t wifi &
         ;;
   stop)
         ;;

@@ -223,7 +223,7 @@ void rtc_wakeup_config(void)
 	mmio_write_32(0x0502708c, 0); // 锁定 pinmux，PWR_WAKEUP0
 
 	mmio_write_32(0x050250ac, 0x2); // 设定 poweroff 时 rtc 不复位
-	mmio_write_32(0x050260d0, 0x3); // 不自动开机
+	// mmio_write_32(0x050260d0, 0x3); // 不自动开机
 	mmio_write_32(0x050260bc, 0x100); // RTC_EN_PWR_WAKEUP 设定唤醒源为 PWR_WAKEUP0
 	// PWR_WAKEUP0 为上升沿触发（默认是高电平触发，会导致poweroff下去，立马又开机）
 	mmio_write_32(0x0502606c, 0x16);
