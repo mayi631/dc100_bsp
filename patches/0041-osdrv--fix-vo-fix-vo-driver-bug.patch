@@ -1,0 +1,55 @@
+From 301c4ec23112349d663921dba33819d3eb012984 Mon Sep 17 00:00:00 2001
+From: "qiliang.zhou" <qiliang.zhou@sophgo.com>
+Date: Mon, 15 Jun 2026 15:34:29 +0800
+Subject: [PATCH] [fix](vo):Fix vo driver bug
+
+[description]:NA
+[root cause]:NA
+[JIRA ID]:CV184XSDK-1223
+[chip project]:CV184X
+[side effects]:NA
+[Affected *.ko/*.so/*.a] :NA
+
+Change-Id: Ic79dba66e688990837d99299f443d742456318bc
+---
+ interdrv/vo/driver/vo_process.c   | 2 ++
+ interdrv/vo/driver/vo_sdk_layer.c | 3 +++
+ 2 files changed, 5 insertions(+)
+
+diff --git a/interdrv/vo/driver/vo_process.c b/interdrv/vo/driver/vo_process.c
+index 7c05bbee..49e03c50 100644
+--- a/interdrv/vo/driver/vo_process.c
++++ b/interdrv/vo/driver/vo_process.c
+@@ -414,6 +414,7 @@ static int layer_process(struct vo_layer_ctx *layer_ctx)
+ 		layer_ctx->predone_pts = vb->buf.pts;
+ 		layer_ctx->done_cnt++;
+ 
++		vb_release_block(blk_out);
+ 		osal_vfree(disp_buf);
+ 	}
+ 
+@@ -446,6 +447,7 @@ static int layer_process(struct vo_layer_ctx *layer_ctx)
+ 		chn_ctx->src_height = vb->buf.size.height;
+ 	}
+ 
++	osal_atomic_inc_return(&vb->usr_cnt);
+ 	disp_buf->blk = (vb_blk)(uintptr_t)vb;
+ 	disp_buf->buf.length = 3;
+ 
+diff --git a/interdrv/vo/driver/vo_sdk_layer.c b/interdrv/vo/driver/vo_sdk_layer.c
+index 2e45d529..f8ce5d9b 100644
+--- a/interdrv/vo/driver/vo_sdk_layer.c
++++ b/interdrv/vo/driver/vo_sdk_layer.c
+@@ -749,6 +749,9 @@ static void release_buffer(struct vo_layer_ctx *layer_ctx, struct osal_list_head
+ 		if (b == NULL)
+ 			return;
+ 
++		if (b->blk != VB_INVALID_HANDLE)
++			vb_release_block((vb_blk)b->blk);
++
+ 		osal_vfree(b);
+ 		b = NULL;
+ 	}
+-- 
+2.25.1
+
