@@ -177,7 +177,3 @@
 		fmt = "IBIF";
 	};
 };
-
-&usb {
-	/delete-property/ vbus-gpio;
-};
