@@ -3,8 +3,11 @@
 #include <pinctrl-mars.h>
 #include "cvi_type.h"
 #include "iic_recovery.h"
+#include <drv/adc.h>
 
 #define GPIO_PIN_MASK(_gpio_num) (1 << _gpio_num)
+
+void PWR_VBATCheck(void);
 
 void _GPIOSetValue(u8 gpio_grp, u8 gpio_num, u8 level)
 {
@@ -237,6 +240,13 @@ void rtc_wakeup_config(void)
 void PLATFORM_IoInit(void)
 {
 	//pinmux 切换接口
+	u_int32_t raw, mv;
+	if (PLATFORM_ReadPwrAdc3(&raw, &mv) == 0){
+		if (mv < 1250){
+			PWR_VBATCheck();
+		}
+	}
+
 	_UartPinmux();
 	_MipiRxPinmux();
 	_MipiTxPinmux();
@@ -368,4 +378,81 @@ void PLATFORM_PanelBacklightCtl(int level)
 int PLATFORM_IrCutCtl(int duty)
 {
     return 0;
+}
+
+void PWR_VBATCheck(void)
+{
+	// 未按下电源键，走 poweroff 流程
+	mmio_write_32(0x050260c0, 0x1); // 使能软件请求下电
+	while (mmio_read_32(0x050260c0) != 0x1)
+		;
+	mmio_write_32(0x05025004, 0xab18); // 解锁对 RTC_CTRL0(0x05025008) 的读写
+	while (1)
+	{
+		mmio_write_32(0x05025008, 0x10001); // 请求下电
+	}
+}
+
+/*
+ * 读取 PWR_ADC3 (PWR_VBAT_DET)
+ *
+ * PWR_ADC3 挂在 RTC 域 SARADC0 (chip_id=3, ch_id=3) 上。
+ * 参考电压 VDD1.8A (1.8V)，12bit 分辨率。
+ *
+ * @param[out] raw   原始 ADC 值 (0~4095)
+ * @param[out] mv    转换后的电压值 (mV)，可为 NULL
+ * @return 0 成功，非 0 失败
+ */
+int PLATFORM_ReadPwrAdc3(uint32_t *raw, uint32_t *mv)
+{
+	csi_adc_t adc;
+	int32_t value;
+	csi_error_t ret;
+
+	if (!raw)
+		return -1;
+
+	/* 1. Init ADC: chip 3 = rtc_adc0 */
+	ret = csi_adc_init(&adc, 3);
+	if (ret != CSI_OK) {
+		printf("[FAIL] csi_adc_init(rtc_adc0) failed: %d\n", ret);
+		return -1;
+	}
+
+	/* 2. Enable channel 2 (PWR_ADC3) */
+	ret = csi_adc_channel_enable(&adc, 3, true);
+	if (ret != CSI_OK) {
+		printf("[FAIL] csi_adc_channel_enable ch2 failed: %d\n", ret);
+		goto err_uninit;
+	}
+
+	/* 3. Start conversion */
+	ret = csi_adc_start(&adc);
+	if (ret != CSI_OK) {
+		printf("[FAIL] csi_adc_start failed: %d\n", ret);
+		goto err_uninit;
+	}
+
+	/* 4. Read value */
+	value = csi_adc_read(&adc);
+	if (value < 0) {
+		printf("[FAIL] csi_adc_read failed: %d\n", value);
+		csi_adc_stop(&adc);
+		goto err_uninit;
+	}
+
+	/* 5. Stop */
+	csi_adc_stop(&adc);
+
+	*raw = (uint32_t)value;
+
+	if (mv)
+		*mv = (value * 1800) / 4096;   /* VDD1.8A, 12bit */
+
+	csi_adc_uninit(&adc);
+	return 0;
+
+err_uninit:
+	csi_adc_uninit(&adc);
+	return -1;
 }
