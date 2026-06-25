@@ -1,0 +1,564 @@
+From 425faa8d8413bd41fa05ee1d6f9183641df2d889 Mon Sep 17 00:00:00 2001
+From: "xiu.yang" <xiu.yang@sophgo.com>
+Date: Thu, 25 Jun 2026 14:37:51 +0800
+Subject: [PATCH] fix(adc): fix small core ADC driver for CV184X SARADC
+
+- Fix CTRL register bit layout: EN=bit[0], START=bit[1], with edge trigger
+- Fix channel select to use one-hot encoding via ADC_CHANNEL_SEL_CH macro
+- Replace STATUS busy polling with udelay(100) matching Linux behavior
+- Add VDD1.8A vref configuration (SARADC_TEST bit[2]) on all controllers
+- Move vref/trim into cvi_adc_init to avoid repeated reconfiguration
+- Remove unreliable channel conflict detection (shared between cores)
+- Remove hardcoded EFUSE clock register write that caused NAND timeout
+
+Change-Id: Ia223782f5a74438b8024552f307a36386433a1f7
+---
+ .../src/drivers/adc/cvi/src/cvi_adc.c         | 236 +++++++-----------
+ .../src/hal/adc/cvi/include/hal_adc.h         |  65 ++---
+ components/cvi_test/test/adc/test_csi_adc.c   | 110 ++++----
+ 3 files changed, 178 insertions(+), 233 deletions(-)
+
+diff --git a/components/chip_cv184x/src/drivers/adc/cvi/src/cvi_adc.c b/components/chip_cv184x/src/drivers/adc/cvi/src/cvi_adc.c
+index df15bab0..d85bacb9 100644
+--- a/components/chip_cv184x/src/drivers/adc/cvi/src/cvi_adc.c
++++ b/components/chip_cv184x/src/drivers/adc/cvi/src/cvi_adc.c
+@@ -1,31 +1,35 @@
+ /*
+-* Copyright (C) Cvitek Co., Ltd. 2019-2020. All rights reserved.
+-*/
++ * Copyright (C) Cvitek Co., Ltd. 2019-2020. All rights reserved.
++ */
+ 
++#include "cvi_adc.h"
++#include "mmio.h"
++#include <csi_config.h>
++#include <csi_core.h>
+ #include <drv/common.h>
+-#include <drv/pin.h>
+ #include <drv/cvi_irq.h>
++#include <drv/pin.h>
+ #include <drv/tick.h>
+-#include "cvi_adc.h"
+-#include "mmio.h"
+-#include <stdint.h>
+ #include <soc.h>
+-#include <csi_core.h>
+-#include <csi_config.h>
++#include <stdint.h>
++
++extern void udelay(uint32_t us);
+ 
+ #define ADC_FREQ_DEFAULT 25000000
+-#define DEFUALT_CVI_ADC_OPERATION_TIMEOUT    1000000U   // 1 second
+-#define MAX_CHANNEL_NUM                      3U
++#define DEFUALT_CVI_ADC_OPERATION_TIMEOUT 1000000U // 1 second
++#define MAX_CHANNEL_NUM 3U
+ 
+ #define EFUSE_ADC_TRIM_REG 0x18
+ #define TOP_ADC_TRIM_MASK 0xf0000000
+ #define TOP_ADC_TRIM_OFFSET 28
+ #define RTC_ADC_TRIM_MASK 0x0f000000
+ #define RTC_ADC_TRIM_OFFSET 24
+-#define EFUSE_BASE      0x03050000
+-#define EFUSE_FTSN0     0x100
++#define EFUSE_BASE 0x03050000
++#define EFUSE_FTSN0 0x100
+ 
+-#define TRIM	  0x34
++#define TRIM 0x34
++#define SARADC_TEST 0x30
++#define SARADC_TRIM_VALUE 0xc
+ 
+ // static void cvi_adc_all_channel_done_irq(cvi_adc_t *adc)
+ // {
+@@ -57,91 +61,50 @@
+ #define ADC_CLK_CONTROL_REG (void __iomem *)0x030020f8
+ #define RTC_SYS_CLK_CONTROL_REG (void __iomem *)0x05025034
+ 
+-
+-void cvi_adc_trim(cvi_adc_t *adc)
+-{
+-    u32 top_trim, rtc_trim;
+-    u32 efuse_value;
+-    u32 trim_val;
+-    unsigned long reg_base = GET_DEV_REG_BASE(adc);
+-    printf("cvi_adc_trim reg_base: 0x%lx\n", reg_base);
+-    u32 efuse_clk_val, adc_clk_val;
+-    int efuse_clk_enabled = 0;
+-    int adc_clk_enabled = 0;
+-
+-    writel(0xFBFFF28F, EFUSE_CLK_CONTROL_REG); // enable efuse clock
+-    // Check and enable EFUSE clock if needed
+-    efuse_clk_val = readl(EFUSE_CLK_CONTROL_REG);
+-    if (!(efuse_clk_val & (1 << 29))) {
+-        writel(efuse_clk_val | (1 << 29), EFUSE_CLK_CONTROL_REG);
+-        efuse_clk_enabled = 1;
+-    }
+-
+-    efuse_value = mmio_read_32(EFUSE_BASE + EFUSE_FTSN0 + (EFUSE_ADC_TRIM_REG));
+-    printf("0x%x\n", efuse_value);
+-
+-    // Restore EFUSE clock state
+-    if (efuse_clk_enabled) {
+-        writel(efuse_clk_val, EFUSE_CLK_CONTROL_REG);
+-    }
+-
+-    top_trim = (efuse_value & TOP_ADC_TRIM_MASK) >> TOP_ADC_TRIM_OFFSET;
+-    rtc_trim = (efuse_value & RTC_ADC_TRIM_MASK) >> RTC_ADC_TRIM_OFFSET;
+-
+-    // printf("Setting top_trim: 0x%x, rtc_trim: 0x%x\n", top_trim, rtc_trim);
+-
+-    writel(0xA00C3FFF, ADC_CLK_CONTROL_REG); // enable ADC clock
+-    // Check and enable ADC clock if needed
+-    adc_clk_val = readl(ADC_CLK_CONTROL_REG);
+-    if (!(adc_clk_val & (1 << 29))) {
+-        writel(adc_clk_val | (1 << 29), ADC_CLK_CONTROL_REG);
+-        adc_clk_enabled = 1;
+-    }
+-
+-    // Determine domain based on address (RTC domain starts at 0x05xxxxxx)
+-    if (reg_base >= 0x05000000) {
+-        trim_val = rtc_trim;
+-    } else {
+-        trim_val = top_trim;
+-    }
+-
+-    writel(trim_val, (void __iomem *)reg_base + TRIM);
+-    printf("Writing trim: 0x%x\n", readl((void __iomem *)reg_base + TRIM) & 0xf);
+-
+-    // Restore ADC clock state
+-    if (adc_clk_enabled) {
+-        writel(adc_clk_val, ADC_CLK_CONTROL_REG);
+-    }
+-
+-    // printf("adc trim ok!\n");
++void cvi_adc_trim(cvi_adc_t *adc) {
++  static int vref_configured = 0;
++  unsigned long reg_base = GET_DEV_REG_BASE(adc);
++  u32 adc_test;
++
++  // Set vref to VDD1.8A on all controllers (once)
++  if (!vref_configured) {
++    adc_test = readl(SARADC0_BASE_ADDR + SARADC_TEST) | 4;
++    writel(adc_test, SARADC0_BASE_ADDR + SARADC_TEST);
++    writel(adc_test, SARADC1_BASE_ADDR + SARADC_TEST);
++    writel(adc_test, SARADC2_BASE_ADDR + SARADC_TEST);
++    writel(adc_test, RTCSYS_SARADC0_BASE_ADDR + SARADC_TEST);
++    writel(adc_test, RTCSYS_SARADC1_BASE_ADDR + SARADC_TEST);
++    vref_configured = 1;
++  }
++
++  // Set trim value for this controller
++  writel(SARADC_TRIM_VALUE, (void __iomem *)reg_base + TRIM);
+ }
+ 
+-static void cvi_adc_irqhandler(unsigned int irqn, void *args)
+-{
+-	uint8_t i;
+-    cvi_adc_t *adc;
++static void cvi_adc_irqhandler(unsigned int irqn, void *args) {
++  uint8_t i;
++  cvi_adc_t *adc;
+ 
+-    adc      = (cvi_adc_t *)args;
++  adc = (cvi_adc_t *)args;
+ 
+-    adc_clear_int_flag(HANDLE_REG_BASE(adc));
++  adc_clear_int_flag(HANDLE_REG_BASE(adc));
+ 
+-	for (i=0; i<adc->num; i++)
+-		adc->data[i] = cvi_adc_read(adc);
++  for (i = 0; i < adc->num; i++)
++    adc->data[i] = cvi_adc_read(adc);
+ 
+-    if (adc->callback) {
+-        adc->callback(adc, 0, adc->arg);
+-    }
++  if (adc->callback) {
++    adc->callback(adc, 0, adc->arg);
++  }
+ 
+-    // cvi_adc_start(adc);
++  // cvi_adc_start(adc);
+ }
+ 
+-static cvi_error_t cvi_adc_start_intr(cvi_adc_t *adc)
+-{
+-    unsigned long reg_base = HANDLE_REG_BASE(adc);
+-    csi_irq_enable((uint32_t)adc->dev.irq_num);
+-    adc_en_int_all_channel_done(reg_base);
+-    adc_start(reg_base);
+-    return CVI_OK;
++static cvi_error_t cvi_adc_start_intr(cvi_adc_t *adc) {
++  unsigned long reg_base = HANDLE_REG_BASE(adc);
++  csi_irq_enable((uint32_t)adc->dev.irq_num);
++  adc_en_int_all_channel_done(reg_base);
++  adc_start(reg_base);
++  return CVI_OK;
+ }
+ 
+ static cvi_error_t cvi_adc_stop_intr(cvi_adc_t *adc)
+@@ -212,28 +175,29 @@ cvi_error_t cvi_adc_init(cvi_adc_t *adc)
+         // Check and enable RTC ADC1 clock bit 24
+         adc_clk_val = readl(RTC_SYS_CLK_CONTROL_REG);
+         if (!(adc_clk_val & (1 << 24))) {
+-            writel(adc_clk_val | (1 << 24), RTC_SYS_CLK_CONTROL_REG);
++          writel(adc_clk_val | (1 << 24), RTC_SYS_CLK_CONTROL_REG);
+         }
+ 
+-        printf("adc init ok! reg_base: 0x%lx, bank: %d, irq_num: %d\n", reg_base, GET_DEV_IDX(adc), irqn);
++        cvi_adc_trim(adc);
++
++        printf("adc init ok! reg_base: 0x%lx, bank: %d, irq_num: %d\n",
++               reg_base, GET_DEV_IDX(adc), irqn);
+         cvi_adc_sampling_time(adc, 0xf); // set smpling cycle 640ns
+         return CVI_OK;
+-    }
+-    else
+-    {
+-        printf("adc init failed! reg_base: 0x%lx, bank: %d, irq_num: %d\n", reg_base, GET_DEV_IDX(adc), irqn);
+-        return CVI_ERROR;
++    } else {
++      printf("adc init failed! reg_base: 0x%lx, bank: %d, irq_num: %d\n",
++             reg_base, GET_DEV_IDX(adc), irqn);
++      return CVI_ERROR;
+     }
+ 
+     return CVI_OK;
+ }
+ 
+-void cvi_adc_uninit(cvi_adc_t *adc)
+-{
+-    unsigned long reg_base = GET_DEV_REG_BASE(adc);
+-    adc_reset_sel_channel(reg_base, ((uint32_t)adc->ch_id << (ADC_CTRL_ADC_SEL_Pos + 1)));
+-    adc->ch_id = 0;
+-    // Avoid shutdown the channel used by linux
++void cvi_adc_uninit(cvi_adc_t *adc) {
++  unsigned long reg_base = GET_DEV_REG_BASE(adc);
++  adc_reset_sel_channel(reg_base, ADC_CHANNEL_SEL_CH(adc->ch_id));
++  adc->ch_id = 0;
++  // Avoid shutdown the channel used by linux
+ #if 0
+     adc_stop(reg_base);
+ #endif
+@@ -347,27 +311,18 @@ cvi_error_t cvi_adc_channel_enable(cvi_adc_t *adc, uint8_t ch_id, bool is_enable
+         printf("invalid ch_id\n");
+         return CVI_ERROR;
+     }
+-    #endif
+ #endif
+-
+-    // channel is used by linux
+-    if ((adc_get_sel_channel(reg_base) & ((uint32_t)ch_id << (ADC_CTRL_ADC_SEL_Pos + 1)))
+-        && (ch_id != adc->ch_id)) {
+-        printf("adc chip: %d, ch: %d is used!", adc->dev.idx, ch_id);
+-        // ignore rtc adc channel
+-        if (adc->dev.idx != 1)
+-            return CVI_ERROR;
+-    }
++#endif
+ 
+     if (ch_id < 1 || ch_id > 3 || (adc->dev.idx == 1 && ch_id > 2)) {
+-        printf("invalid ch_id\n");
+-        ret = CVI_ERROR;
++      printf("invalid ch_id\n");
++      ret = CVI_ERROR;
+     } else {
+-        adc->ch_id = ch_id;
+-        if (is_enable)
+-            adc_set_sel_channel(reg_base, ((uint32_t)ch_id << (ADC_CTRL_ADC_SEL_Pos + 1)));
+-        else
+-            adc_reset_sel_channel(reg_base, ((uint32_t)ch_id << (ADC_CTRL_ADC_SEL_Pos + 1)));
++      adc->ch_id = ch_id;
++      if (is_enable)
++        adc_set_sel_channel(reg_base, ADC_CHANNEL_SEL_CH(ch_id));
++      else
++        adc_reset_sel_channel(reg_base, ADC_CHANNEL_SEL_CH(ch_id));
+     }
+ 
+     return ret;
+@@ -407,44 +362,29 @@ uint32_t cvi_adc_freq_div(cvi_adc_t *adc, uint32_t div)
+     return ret;
+ }
+ 
+-int32_t cvi_adc_read(cvi_adc_t *adc)
+-{
+-    int32_t ret = CVI_OK;
+-
+-    unsigned long reg_base = GET_DEV_REG_BASE(adc);
++int32_t cvi_adc_read(cvi_adc_t *adc) {
++  unsigned long reg_base = GET_DEV_REG_BASE(adc);
+ 
+-    uint32_t timestart = csi_tick_get_ms();
++  udelay(100);
+ 
+-    while (adc_get_data_ready(reg_base) == 0U) {
+-        if ((csi_tick_get_ms() - timestart) > DEFUALT_CVI_ADC_OPERATION_TIMEOUT) {
+-            ret = CVI_TIMEOUT;
+-            break;
+-        }
+-    }
+-
+-    if (ret == CVI_OK) {
+-        ret = (int32_t)adc_get_channel_data_ch(reg_base, adc->ch_id);
+-    }
+-
+-    return ret;
++  return (int32_t)adc_get_channel_data_ch(reg_base, adc->ch_id);
+ }
+ 
+-cvi_error_t cvi_adc_get_state(cvi_adc_t *adc, cvi_state_t *state)
+-{
+-    *state = adc->state;
+-    return CVI_OK;
++cvi_error_t cvi_adc_get_state(cvi_adc_t *adc, cvi_state_t *state) {
++  *state = adc->state;
++  return CVI_OK;
+ }
+ 
+-uint32_t cvi_adc_get_freq(cvi_adc_t *adc)
+-{
++uint32_t cvi_adc_get_freq(cvi_adc_t *adc) {
+ 
+-    uint32_t div;
++  uint32_t div;
+ 
+-    div = adc_get_clk_div(GET_DEV_REG_BASE(adc)) >> ADC_CYC_SET_ADC_CYC_CLK_DIV_Pos;
++  div =
++      adc_get_clk_div(GET_DEV_REG_BASE(adc)) >> ADC_CYC_SET_ADC_CYC_CLK_DIV_Pos;
+ 
+-    // return soc_get_adc_freq((uint32_t)adc->dev.idx) / (2U * (div + 1U));
+-    // return soc_get_adc_freq((uint32_t)adc->dev.idx) / (div + 1U);
+-    return ADC_FREQ_DEFAULT / (div + 1U);
++  // return soc_get_adc_freq((uint32_t)adc->dev.idx) / (2U * (div + 1U));
++  // return soc_get_adc_freq((uint32_t)adc->dev.idx) / (div + 1U);
++  return ADC_FREQ_DEFAULT / (div + 1U);
+ }
+ 
+ cvi_error_t cvi_adc_configure_irq(cvi_adc_t *adc, void *callback, void *arg)
+diff --git a/components/chip_cv184x/src/hal/adc/cvi/include/hal_adc.h b/components/chip_cv184x/src/hal/adc/cvi/include/hal_adc.h
+index e24f7164..f37d8666 100644
+--- a/components/chip_cv184x/src/hal/adc/cvi/include/hal_adc.h
++++ b/components/chip_cv184x/src/hal/adc/cvi/include/hal_adc.h
+@@ -42,17 +42,23 @@ extern "C" {
+ 
+ #endif
+ 
+-#define     __IM     volatile const       /*! Defines 'read only' structure member permissions */
+-#define     __OM     volatile             /*! Defines 'write only' structure member permissions */
+-#define     __IOM    volatile             /*! Defines 'read / write' structure member permissions */
++#define __IM                                                                   \
++  volatile const      /*! Defines 'read only' structure member permissions */
++#define __OM volatile /*! Defines 'write only' structure member permissions */
++#define __IOM                                                                  \
++  volatile /*! Defines 'read / write' structure member permissions */
+ 
+ /* CTRL REG */
+-#define ADC_CTRL_ADC_START_Pos                      (0U)
+-#define ADC_CTRL_ADC_START_Msk                      (1U << ADC_CTRL_ADC_START_Pos)
+-#define ADC_CTRL_ADC_START                          ADC_CTRL_ADC_START_Msk
++#define ADC_CTRL_ADC_EN_Pos (0U)
++#define ADC_CTRL_ADC_EN_Msk (1U << ADC_CTRL_ADC_EN_Pos)
++#define ADC_CTRL_ADC_EN ADC_CTRL_ADC_EN_Msk
+ 
+-#define ADC_CTRL_ADC_SEL_Pos                        (4U)
+-#define ADC_CHANNEL_SEL_Msk                         (0xF << ADC_CTRL_ADC_SEL_Pos)
++#define ADC_CTRL_ADC_START_Pos (1U)
++#define ADC_CTRL_ADC_START_Msk (1U << ADC_CTRL_ADC_START_Pos)
++#define ADC_CTRL_ADC_START ADC_CTRL_ADC_START_Msk
++
++#define ADC_CTRL_ADC_SEL_Pos (4U)
++#define ADC_CHANNEL_SEL_Msk (0xF << ADC_CTRL_ADC_SEL_Pos)
+ #define ADC_CHANNEL_SEL_1		                   (1U << (ADC_CTRL_ADC_SEL_Pos + 1U))
+ #define ADC_CHANNEL_SEL_2		                   (1U << (ADC_CTRL_ADC_SEL_Pos + 2U))
+ #define ADC_CHANNEL_SEL_3		                   (1U << (ADC_CTRL_ADC_SEL_Pos + 3U))
+@@ -149,38 +155,37 @@ static struct cvi_adc_regs_t *cvi_adc_reg = &cv182x_adc_reg;
+ #define ADC_INTR_EN(reg_base)      *((__IOM uint32_t *)(reg_base + cvi_adc_reg->INTR_EN))
+ #define ADC_INTR_CLR(reg_base)     *((__IOM uint32_t *)(reg_base + cvi_adc_reg->INTR_CLR))
+ #define ADC_INTR_STA(reg_base)     *((__IM uint32_t *)(reg_base + cvi_adc_reg->INTR_STA))
+-#define ADC_INTR_RAW(reg_base)     *((__IM uint32_t *)(reg_base + cvi_adc_reg->INTR_RAW))
+-#define ADC_TRIM(reg_base)     (*((__IM uint32_t *)((reg_base) + (cvi_adc_reg->TRIM))))
+-
+-static inline void adc_start(unsigned long reg_base)
+-{
+-    pr_debug("write reg %08p value %#x\n", &ADC_CTRL(reg_base), ADC_CTRL(reg_base) | ADC_CTRL_ADC_START);
+-    ADC_CTRL(reg_base) |= ADC_CTRL_ADC_START;
++#define ADC_INTR_RAW(reg_base)                                                 \
++  *((__IM uint32_t *)(reg_base + cvi_adc_reg->INTR_RAW))
++#define ADC_TRIM(reg_base)                                                     \
++  (*((__IM uint32_t *)((reg_base) + (cvi_adc_reg->TRIM))))
++
++static inline void adc_start(unsigned long reg_base) {
++  uint32_t ctrl = ADC_CTRL(reg_base);
++  ctrl &= ~(ADC_CTRL_ADC_EN | ADC_CTRL_ADC_START);
++  ADC_CTRL(reg_base) = ctrl;
++  ctrl |= (ADC_CTRL_ADC_EN | ADC_CTRL_ADC_START);
++  ADC_CTRL(reg_base) = ctrl;
+ }
+ 
+-static inline uint32_t adc_get_start(unsigned long reg_base)
+-{
+-    return (ADC_CTRL(reg_base) & ADC_CTRL_ADC_START_Msk);
++static inline uint32_t adc_get_start(unsigned long reg_base) {
++  return (ADC_CTRL(reg_base) & (ADC_CTRL_ADC_EN_Msk | ADC_CTRL_ADC_START_Msk));
+ }
+ 
+-static inline void adc_stop(unsigned long reg_base)
+-{
+-    ADC_CTRL(reg_base) &= ~ADC_CTRL_ADC_START;
++static inline void adc_stop(unsigned long reg_base) {
++  ADC_CTRL(reg_base) &= ~(ADC_CTRL_ADC_EN | ADC_CTRL_ADC_START);
+ }
+ 
+-static inline uint32_t adc_get_stop(unsigned long reg_base)
+-{
+-    return (ADC_CTRL(reg_base) & ADC_CTRL_ADC_START_Msk);
++static inline uint32_t adc_get_stop(unsigned long reg_base) {
++  return !(ADC_CTRL(reg_base) & (ADC_CTRL_ADC_EN_Msk | ADC_CTRL_ADC_START_Msk));
+ }
+ 
+-static inline uint32_t adc_get_data_ready(unsigned long reg_base)
+-{
+-    return !(ADC_STATUS(reg_base) & ADC_STATUS_ADC_BUSY_Msk);
++static inline uint32_t adc_get_data_ready(unsigned long reg_base) {
++  return !(ADC_STATUS(reg_base) & ADC_STATUS_ADC_BUSY_Msk);
+ }
+ 
+-static inline uint32_t adc_get_idle(unsigned long reg_base)
+-{
+-    return !(ADC_STATUS(reg_base) & ADC_STATUS_ADC_BUSY_Msk);
++static inline uint32_t adc_get_idle(unsigned long reg_base) {
++  return !(ADC_STATUS(reg_base) & ADC_STATUS_ADC_BUSY_Msk);
+ }
+ 
+ static inline void adc_set_sel_channel(unsigned long reg_base, uint32_t value)
+diff --git a/components/cvi_test/test/adc/test_csi_adc.c b/components/cvi_test/test/adc/test_csi_adc.c
+index b41d4dbf..b10cf5a7 100644
+--- a/components/cvi_test/test/adc/test_csi_adc.c
++++ b/components/cvi_test/test/adc/test_csi_adc.c
+@@ -61,67 +61,67 @@ void test_adc(int32_t argc, char **argv)
+         goto err_uninit;
+     }
+ 
+-    // 3. Trim (Calibration)
+-    csi_adc_trim(&adc);
++    // // 3. Trim (Calibration)
++    // csi_adc_trim(&adc);
+ 
+     if (mode == 0) {
+-        /* --- Polling Mode (Original) --- */
+-        ret = csi_adc_start(&adc);
+-        if (ret != CSI_OK) {
+-            printf("csi_adc_start failed\n");
+-            goto err_uninit;
+-        }
++      /* --- Polling Mode (Original) --- */
++      ret = csi_adc_start(&adc);
++      if (ret != CSI_OK) {
++        printf("csi_adc_start failed\n");
++        goto err_uninit;
++      }
+ 
+-        value = csi_adc_read(&adc);
+-        printf("adc get value: %d\n", value);
++      value = csi_adc_read(&adc);
++      printf("adc get value: %d\n", value);
+ 
+-        csi_adc_stop(&adc);
++      csi_adc_stop(&adc);
+ 
+     } else {
+-        /* --- Interrupt Mode (New) --- */
+-        g_adc_complete_flag = 0;
+-        g_recv_buf[0] = 0;
+-
+-        // a. Configure Buffer (Required for cvi_adc_start_async)
+-        ret = csi_adc_set_buffer(&adc, g_recv_buf, 1);
+-        if (ret != CSI_OK) {
+-            printf("csi_adc_set_buffer failed\n");
+-            goto err_uninit;
+-        }
+-
+-        // b. Attach Callback (Enables IRQ internally in driver)
+-        ret = csi_adc_attach_callback(&adc, user_adc_callback, NULL);
+-        if (ret != CSI_OK) {
+-            printf("csi_adc_attach_callback failed\n");
+-            goto err_uninit;
+-        }
+-
+-        // c. Start Async
+-        ret = csi_adc_start_async(&adc);
+-        if (ret != CSI_OK) {
+-            printf("csi_adc_start_async failed\n");
+-            goto err_detach;
+-        }
+-
+-        printf("ADC started async, waiting for IRQ...\n");
+-
+-        // d. Wait for callback (Timeout protection recommended)
+-        int timeout_ms = 2000;
+-        while (!g_adc_complete_flag && timeout_ms > 0) {
+-            aos_msleep(10); // Sleep 10ms
+-            timeout_ms -= 10;
+-        }
+-
+-        if (g_adc_complete_flag) {
+-            printf("adc get value (async): %d\n", g_recv_buf[0]);
+-        } else {
+-            printf("adc timeout! IRQ did not trigger.\n");
+-        }
+-
+-        csi_adc_stop_async(&adc);
+-
+-err_detach:
+-        csi_adc_detach_callback(&adc);
++      /* --- Interrupt Mode (New) --- */
++      g_adc_complete_flag = 0;
++      g_recv_buf[0] = 0;
++
++      // a. Configure Buffer (Required for cvi_adc_start_async)
++      ret = csi_adc_set_buffer(&adc, g_recv_buf, 1);
++      if (ret != CSI_OK) {
++        printf("csi_adc_set_buffer failed\n");
++        goto err_uninit;
++      }
++
++      // b. Attach Callback (Enables IRQ internally in driver)
++      ret = csi_adc_attach_callback(&adc, user_adc_callback, NULL);
++      if (ret != CSI_OK) {
++        printf("csi_adc_attach_callback failed\n");
++        goto err_uninit;
++      }
++
++      // c. Start Async
++      ret = csi_adc_start_async(&adc);
++      if (ret != CSI_OK) {
++        printf("csi_adc_start_async failed\n");
++        goto err_detach;
++      }
++
++      printf("ADC started async, waiting for IRQ...\n");
++
++      // d. Wait for callback (Timeout protection recommended)
++      int timeout_ms = 2000;
++      while (!g_adc_complete_flag && timeout_ms > 0) {
++        aos_msleep(10); // Sleep 10ms
++        timeout_ms -= 10;
++      }
++
++      if (g_adc_complete_flag) {
++        printf("adc get value (async): %d\n", g_recv_buf[0]);
++      } else {
++        printf("adc timeout! IRQ did not trigger.\n");
++      }
++
++      csi_adc_stop_async(&adc);
++
++    err_detach:
++      csi_adc_detach_callback(&adc);
+     }
+ 
+     printf("test adc success.\r\n");
+-- 
+2.25.1
+
