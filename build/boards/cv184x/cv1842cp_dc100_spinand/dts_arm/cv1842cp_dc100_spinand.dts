@@ -121,13 +121,13 @@
 		io-channels = <&saradc0 13>;
 		io-channel-names = "battery";
 		monitored-battery = <&battery_cell>;
-		poll-interval-ms = <3000>;
+		poll-interval-ms = <500>;  /* 加快扫描频率到200ms */
 		voltage-scale = <1025>;
-		voltage-filter-alpha-permil = <250>;
-		capacity-step-up-percent = <2>;
-		capacity-step-down-percent = <1>;
-		transient-drop-microvolt = <120000>;
-		transient-hold-ms = <3000>;
+		voltage-filter-alpha-permil = <900>;  /* 大幅降低滤波系数，快速响应 */
+		capacity-step-up-percent = <100>;       /* 电量增加1%就更新 */
+		capacity-step-down-percent = <100>;     /* 电量减少1%就更新 */
+		transient-drop-microvolt = <0>;   /* 降低瞬态压降阈值到30mV */
+		transient-hold-ms = <0>;             /* 缩短瞬态保持时间到30ms */
 	};
 };
 
@@ -177,3 +177,5 @@
 		fmt = "IBIF";
 	};
 };
+
+
