@@ -243,7 +243,7 @@ void PLATFORM_IoInit(void)
 	//pinmux 切换接口
 	u_int32_t raw, mv;
 	if (PLATFORM_ReadPwrAdc3(&raw, &mv) == 0){
-		if (mv < 1250){
+		if (mv < 1042){
 			PWR_VBATCheck();
 		}
 	}
@@ -448,7 +448,7 @@ int PLATFORM_ReadPwrAdc3(uint32_t *raw, uint32_t *mv)
 	*raw = (uint32_t)value;
 
 	if (mv)
-		*mv = (value * 1800) / 4096;   /* VDD1.8A, 12bit */
+		*mv = (value * 1500) / 4096;   /* VDD1.8A, 12bit */
 
 	csi_adc_uninit(&adc);
 	return 0;
