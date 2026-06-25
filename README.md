@@ -80,6 +80,20 @@ defconfig cv1842cp_dc100_spinand
 clean_all && build_all
 ```
 
+## APP 编译
+
+```bash
+# 以下指令需要在同一个终端执行
+cd ./dc100_bsp/..
+export TPU_REL=1; source build/envsetup_soc.sh
+defconfig cv1842cp_dc100_spinand
+cd sophcam
+make cv1842cp_dc100_defconfig
+make clean;make -j
+make install
+make pack_data
+```
+
 ## 代码更改与脚本使用
 
 - 板卡特定的所有的代码更改都应该在 `dc100_bsp` 目录下进行，不要直接在 `SDK_CV184X` 目录下进行更改。
