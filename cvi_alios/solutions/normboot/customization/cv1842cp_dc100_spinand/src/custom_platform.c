@@ -9,6 +9,7 @@
 
 void PWR_VBATCheck(void);
 
+int PLATFORM_ReadPwrAdc3(uint32_t *raw, uint32_t *mv);
 void _GPIOSetValue(u8 gpio_grp, u8 gpio_num, u8 level)
 {
 	csi_error_t ret;
