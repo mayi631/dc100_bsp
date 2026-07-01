@@ -1,0 +1,37 @@
+From aa4ca760334f3ab53824dcff617d2a3cdf32d37f Mon Sep 17 00:00:00 2001
+From: "mason.zou" <mason.zou@sophgo.com>
+Date: Wed, 6 May 2026 16:53:32 +0800
+Subject: [PATCH] [feat](teaisp): support ai isp for dual os [description ]:NA
+ [root   cause]:NA [JIRA      ID]:NA [chip project]:cv184x [side effects]:NA
+ [Affected *.ko/*.so/*.a] :NA
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Change-Id: Ieca9b60f57d173556fa00356c5aa1de6d2029a17
+Reviewed-on: https://gerrit-ai.sophgo.vip:8443/162644
+Reviewed-by: 亮 王 <wangliang.wang@sophgo.com>
+---
+ Makefile | 6 +-----
+ 1 file changed, 1 insertion(+), 5 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index 9d05b5a..60cbedb 100644
+--- a/Makefile
++++ b/Makefile
+@@ -13,11 +13,7 @@ SRCS := $(wildcard $(SDIR)/*.c)
+ OBJS = $(patsubst $(SDIR)/%.c, $(TMP_FOLDER)/%.o, $(wildcard $(SDIR)/*.c))
+ DEPS = $(patsubst $(SDIR)/%.c, $(TMP_FOLDER)/%.d, $(wildcard $(SDIR)/*.c))
+ 
+-LOCAL_LDFLAGS = -L$(TOP_DIR)/cvi_mpi/lib -lisp -lae -lawb -laf
+-
+-ifeq ($(DUAL_OS), n)
+-	 LOCAL_LDFLAGS += -lisp_algo
+-endif
++LOCAL_LDFLAGS = -L$(TOP_DIR)/cvi_mpi/lib -lisp -lisp_algo -lae -lawb -laf
+ LOCAL_LDFLAGS += -lvi -lsys -lm -static
+ 
+ LOCAL_CFLAGS = -I$(TOP_DIR)/cvi_mpi/include -I$(TOP_DIR)/cvi_mpi/include/isp
+-- 
+2.25.1
+

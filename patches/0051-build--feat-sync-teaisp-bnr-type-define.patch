@@ -1,0 +1,29 @@
+From 85878a35570f178c3891c1dcb7208f6653be7cb1 Mon Sep 17 00:00:00 2001
+From: "xiaole.chen" <xiaole.chen@sophgo.com>
+Date: Fri, 12 Jun 2026 11:10:33 +0800
+Subject: [PATCH 2/2] [feat](vi): sync teaisp bnr(wrong type define)
+ [description ]:NA [root   cause]:NA [JIRA      ID]:NA [chip project]:NA
+
+Change-Id: I861347d302d0136f25d833487034b89de525a558
+---
+ media/include/release/cvi_comm_vi.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/media/include/release/cvi_comm_vi.h b/media/include/release/cvi_comm_vi.h
+index 3804b1e2..b7eff0f4 100644
+--- a/media/include/release/cvi_comm_vi.h
++++ b/media/include/release/cvi_comm_vi.h
+@@ -303,9 +303,9 @@ typedef enum _VI_DATA_TYPE_E {
+ 
+ typedef enum _VI_AI_ISP_TYPE_E {
+ 	VI_AI_ISP_CFG_INIT,
++	VI_AI_ISP_CFG_DEINIT,
+ 	VI_AI_ISP_CFG_ENABLE,
+ 	VI_AI_ISP_CFG_DISABLE,
+-	VI_AI_ISP_CFG_DEINIT,
+ } VI_AI_ISP_TYPE_E;
+ 
+ typedef struct _VI_AI_ISP_CFG_S {
+-- 
+2.25.1
+

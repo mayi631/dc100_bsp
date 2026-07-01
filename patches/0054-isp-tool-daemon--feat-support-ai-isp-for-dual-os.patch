@@ -1,0 +1,114 @@
+From 7bc4bb4926215c56c2c2b2bcfc4952eee9a56fb0 Mon Sep 17 00:00:00 2001
+From: "mason.zou" <mason.zou@sophgo.com>
+Date: Wed, 22 Apr 2026 11:28:34 +0800
+Subject: [PATCH 1/3] [feat](teaisp): support ai isp for dual os [description
+ ]:NA [root   cause]:NA [JIRA      ID]:NA [chip project]:cv184x [side
+ effects]:NA [Affected *.ko/*.so/*.a] :NA
+
+Change-Id: Ie1b8b42d56611fc582c2b935c7a48023b92b4f54
+---
+ Makefile                                   |  3 +--
+ isp_daemon_tool/src/module/video_src_cfg.c | 17 +++++------------
+ 2 files changed, 6 insertions(+), 14 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index 02afdd8..3bf47cd 100644
+--- a/Makefile
++++ b/Makefile
+@@ -96,14 +96,13 @@ LIBS += $(MW_LIBS) -latomic -ldl
+ LIBS += -lcvi_bin -lini
+ LIBS += -Wl,-Bstatic -lcvi_ispd2 -Wl,-Bdynamic
+ LIBS += -lraw_dump
++LIBS += -lteaisp
+ LIBS += -lsensor
+ LIBS += -L$(BM_LIB) -lbmrt -lbmlib
+ 
+ ifeq ($(OS_TYPE), DUAL_OS)
+ else
+-LIBS += -lisp_algo
+ LIBS += -lsns_full
+-LIBS += -lteaisp
+ endif
+ 
+ LOCAL_CFLAGS = $(DEFS) $(INCS) -DSDK_VER=$(SDK_VER)
+diff --git a/isp_daemon_tool/src/module/video_src_cfg.c b/isp_daemon_tool/src/module/video_src_cfg.c
+index 149ca22..f61d894 100644
+--- a/isp_daemon_tool/src/module/video_src_cfg.c
++++ b/isp_daemon_tool/src/module/video_src_cfg.c
+@@ -22,11 +22,6 @@
+ 
+ #include "isp_cfg.h"
+ 
+-#ifndef CONFIG_DUAL_OS
+-#define ENABLE_TEAISP_BNR (1)
+-#endif
+-
+-#ifdef ENABLE_TEAISP_BNR
+ #include <dlfcn.h>
+ #define TEAISP_SO_LIB "libteaisp.so"
+ static int teaisp_so_ref_cnt;
+@@ -136,7 +131,6 @@ static int deinit_teaisp_bnr(int pipe)
+ 	}
+ 	return 0;
+ }
+-#endif
+ 
+ static int init_vi_vpss_mode(uint8_t pipe_id, module_video_src_cfg_t *cfg)
+ {
+@@ -389,13 +383,11 @@ int module_video_src_init(uint8_t pipe_id, void *video_src_cfg)
+ 	SENSOR_CFG_S *sensor_cfg = get_sensor_cfg(NULL);
+ 	module_video_src_cfg_t *cfg = (module_video_src_cfg_t *)video_src_cfg;
+ 
+-#ifdef ENABLE_TEAISP_BNR
+ 	if (cfg->enable_teaisp_bnr) {
+ 		if (init_teaisp_bnr(pipe_id) != 0) {
+ 			clog_a("init_teaisp_bnr failed\n");
+ 		}
+ 	}
+-#endif
+ 
+ 	s32Ret = init_vi_vpss_mode(pipe_id, cfg);
+ 	if (s32Ret != CVI_SUCCESS) {
+@@ -409,6 +401,11 @@ int module_video_src_init(uint8_t pipe_id, void *video_src_cfg)
+ 		} else {
+ 			clog_i("start replay mode success!\n");
+ 		}
++		if (cfg->enable_teaisp_bnr) {
++			if (load_bnr_model(pipe_id, cfg->bnr_model_list) != 0) {
++				clog_a("load_bnr_model failed\n");
++			}
++		}
+ 		return s32Ret;
+ 	}
+ 
+@@ -445,13 +442,11 @@ int module_video_src_init(uint8_t pipe_id, void *video_src_cfg)
+ 		return s32Ret;
+ 	}
+ 
+-#ifdef ENABLE_TEAISP_BNR
+ 	if (cfg->enable_teaisp_bnr) {
+ 		if (load_bnr_model(pipe_id, cfg->bnr_model_list) != 0) {
+ 			clog_a("load_bnr_model failed\n");
+ 		}
+ 	}
+-#endif
+ 
+ 	return s32Ret;
+ }
+@@ -495,13 +490,11 @@ int module_video_src_deinit(uint8_t pipe_id, void *video_src_cfg)
+ 	//	clog_e("CVI_VI_UnRegPmCallBack failed with %#x!\n", s32Ret);
+ 	//}
+ 
+-#ifdef ENABLE_TEAISP_BNR
+ 	if (cfg->enable_teaisp_bnr) {
+ 		if (deinit_teaisp_bnr(pipe_id) != 0) {
+ 			clog_a("deinit_teaisp_bnr failed\n");
+ 		}
+ 	}
+-#endif
+ 
+ 	return s32Ret;
+ }
+-- 
+2.25.1
+
