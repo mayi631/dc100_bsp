@@ -5,7 +5,7 @@ project_name: osal
 commit_id: 345d773440228ffd26f3b42e38cfa51b94103d90 osal: weekly rls 2026.03.24
 
 project_name: libsophon
-commit_id: b4e0519ba32d37a92af1dfb4fc0a9f18b7d5002a libsophon: weekly rls 2026.03.24
+commit_id: 14b31d3677bbd69d40c7892e6aa70b9a1e0678df libsophon: weekly rls 2026.06.30
 
 project_name: buildroot-2021.05
 commit_id: 5041fdc1f3c1fcf75c529c86ae82cc4242a6f34c buildroot-2021.05: weekly rls 2025.06.27

@@ -24,20 +24,15 @@ Subject: [PATCH] [feat](bmlib): add mmap/munmap trace and fix
 
 Change-Id: Ic99d0afade70eb282cb11abd4ea91782770cee84
 ---
- bmlib/src/bmlib_memory.cpp | 173 ++++++++++++++++++++++++++++---------
- 1 file changed, 134 insertions(+), 39 deletions(-)
+ bmlib/src/bmlib_memory.cpp | 125 +++++++++++++++++++++++++++++++++++++++------
+ 1 file changed, 108 insertions(+), 17 deletions(-)
 
 diff --git a/bmlib/src/bmlib_memory.cpp b/bmlib/src/bmlib_memory.cpp
-index bda63cc..5464198 100644
+index e6f963d..7c02167 100644
 --- a/bmlib/src/bmlib_memory.cpp
 +++ b/bmlib/src/bmlib_memory.cpp
-@@ -27,14 +27,93 @@
- static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
- 
- static std::unordered_map<__u32, std::pair<__u32, __u32>> ht_addr_fd = {};
--static std::unordered_map<uintptr_t, std::pair<__u32, __u32>> ht_addr_mapped_addr = {};
-+static std::unordered_map<uintptr_t, std::pair<__u32, __u32>>
-+    ht_addr_mapped_addr = {};
+@@ -29,6 +29,84 @@ static std::unordered_map<__u32, std::pair<__u32, __u32>> ht_addr_fd = {};
+ static std::unordered_map<uintptr_t, std::pair<__u32, __u32>> ht_addr_mapped_addr = {};
  static std::mutex ht_rw_mutex;
  
 +static bool bmlib_trace_mmap_enabled() {
@@ -118,19 +113,10 @@ index bda63cc..5464198 100644
 +#define BMLIB_TRACE_MUNMAP(addr, length)                                       \
 +  bmlib_trace_munmap(addr, length, __func__)
 +
- bm_basic_func_t g_basic_func[] = {
--{.func_name = (char*)"sg_api_memset", 0, 0},
--{.func_name = (char*)"sg_api_memcpy", 0, 0},
--{.func_name = (char*)"sg_api_memcpy_wstride", 0, 0},
--{.func_name = (char*)"sg_api_memcpy_byte", 0, 0},
-+    {.func_name = (char *)"sg_api_memset", 0, 0},
-+    {.func_name = (char *)"sg_api_memcpy", 0, 0},
-+    {.func_name = (char *)"sg_api_memcpy_wstride", 0, 0},
-+    {.func_name = (char *)"sg_api_memcpy_byte", 0, 0},
- };
- int g_init_basic_func_flag = 0;
- 
-@@ -457,9 +536,11 @@ static int bm_alloc_gmem(bm_handle_t ctx, bm_device_mem_t *pmem, int heap_id_mas
+ static bool find_cached_mapping(void *vmem, uintptr_t *mapping_key,
+                                 uint64_t *mapped_size) {
+   if (vmem == nullptr) {
+@@ -480,7 +558,9 @@ static int bm_alloc_gmem(bm_handle_t ctx, bm_device_mem_t *pmem, int heap_id_mas
    }
    pmem->u.device.device_addr = alloc_data.paddr;
    pmem->u.device.dmabuf_fd = alloc_data.fd;
@@ -139,12 +125,9 @@ index bda63cc..5464198 100644
 +      BMLIB_TRACE_MMAP(NULL, pmem->size, PROT_READ | PROT_WRITE, MAP_SHARED,
 +                       pmem->u.device.dmabuf_fd, 0);
    bmlib_log(BMLIB_MEMORY_LOG_TAG, BMLIB_LOG_DEBUG,
--    "pmem->u.device.mapped_memory:%p\n", pmem->u.device.mapped_memory);
-+            "pmem->u.device.mapped_memory:%p\n", pmem->u.device.mapped_memory);
+     "pmem->u.device.mapped_memory:%p\n", pmem->u.device.mapped_memory);
    if (pmem->u.device.mapped_memory == MAP_FAILED) {
-     bmlib_log(BMLIB_MEMORY_LOG_TAG, BMLIB_LOG_ERROR, "%s:%d failed, fd=%d\n", __func__, __LINE__, pmem->u.device.dmabuf_fd);
-     return BM_ERR_PARAM;
-@@ -519,10 +600,13 @@ static int bm_alloc_gmem_u64(bm_handle_t ctx, bm_device_mem_u64_t *pmem, int hea
+@@ -542,7 +622,9 @@ static int bm_alloc_gmem_u64(bm_handle_t ctx, bm_device_mem_u64_t *pmem, int hea
    }
    pmem->u.device.device_addr = alloc_data.paddr;
    pmem->u.device.dmabuf_fd = alloc_data.fd;
@@ -153,80 +136,36 @@ index bda63cc..5464198 100644
 +      BMLIB_TRACE_MMAP(NULL, pmem->size, PROT_READ | PROT_WRITE, MAP_SHARED,
 +                       pmem->u.device.dmabuf_fd, 0);
    if (pmem->u.device.mapped_memory == MAP_FAILED) {
--      bmlib_log(BMLIB_MEMORY_LOG_TAG, BMLIB_LOG_ERROR, "%s:%d failed, fd=%d\n", __func__, __LINE__, pmem->u.device.dmabuf_fd);
--      return BM_ERR_PARAM;
-+    bmlib_log(BMLIB_MEMORY_LOG_TAG, BMLIB_LOG_ERROR, "%s:%d failed, fd=%d\n",
-+              __func__, __LINE__, pmem->u.device.dmabuf_fd);
-+    return BM_ERR_PARAM;
-   }
-   // According to the toolchain, this is intended for user-level use.
-   std::unique_lock<std::mutex> lock(ht_rw_mutex);
-@@ -557,8 +641,8 @@ static int bm_alloc_gmem_u64(bm_handle_t ctx, bm_device_mem_u64_t *pmem, int hea
- static bm_status_t bm_free_gmem(bm_handle_t ctx, bm_device_mem_t *pmem) {
-   int ret;
+       bmlib_log(BMLIB_MEMORY_LOG_TAG, BMLIB_LOG_ERROR, "%s:%d failed, fd=%d\n", __func__, __LINE__, pmem->u.device.dmabuf_fd);
+       return BM_ERR_PARAM;
+@@ -582,7 +664,7 @@ static bm_status_t bm_free_gmem(bm_handle_t ctx, bm_device_mem_t *pmem) {
+   uintptr_t mapping_key_to_erase = (uintptr_t)(pmem->u.device.mapped_memory);
  
--  if (pmem->u.device.mapped_memory){
+   if (pmem->u.device.mapped_memory){
 -    munmap(pmem->u.device.mapped_memory, pmem->size);
-+  if (pmem->u.device.mapped_memory) {
 +    BMLIB_TRACE_MUNMAP(pmem->u.device.mapped_memory, pmem->size);
    } else {
      std::unique_lock<std::mutex> lock(ht_rw_mutex);
      uint64_t size = 0;
-@@ -567,11 +651,12 @@ static bm_status_t bm_free_gmem(bm_handle_t ctx, bm_device_mem_t *pmem) {
-     for (const auto &pair : ht_addr_mapped_addr) {
-       const auto &key = pair.first;
-       const auto &range = pair.second;
--      if (pmem->u.device.device_addr >= range.first && pmem->u.device.device_addr < range.second) {
--          map_memory_begin = (void *)key;
--          size =  range.second - range.first;
+@@ -595,7 +677,7 @@ static bm_status_t bm_free_gmem(bm_handle_t ctx, bm_device_mem_t *pmem) {
+           map_memory_begin = (void *)key;
+           size =  range.second - range.first;
+           mapping_key_to_erase = key;
 -          munmap(map_memory_begin, size);
--          break;
-+      if (pmem->u.device.device_addr >= range.first &&
-+          pmem->u.device.device_addr < range.second) {
-+        map_memory_begin = (void *)key;
-+        size = range.second - range.first;
-+        BMLIB_TRACE_MUNMAP(map_memory_begin, size);
-+        break;
++          BMLIB_TRACE_MUNMAP(map_memory_begin, size);
+           break;
        }
      }
-     lock.unlock();
-@@ -597,10 +682,10 @@ static bm_status_t bm_free_gmem(bm_handle_t ctx, bm_device_mem_t *pmem) {
-   return BM_SUCCESS;
- }
+@@ -625,7 +707,7 @@ static bm_status_t bm_free_gmem(bm_handle_t ctx, bm_device_mem_t *pmem) {
  
--
--static bm_status_t bm_free_gmem_u64(bm_handle_t ctx, bm_device_mem_u64_t *pmem) {
-+static bm_status_t bm_free_gmem_u64(bm_handle_t ctx,
-+                                    bm_device_mem_u64_t *pmem) {
+ static bm_status_t bm_free_gmem_u64(bm_handle_t ctx, bm_device_mem_u64_t *pmem) {
    int ret;
 -  munmap(pmem->u.device.mapped_memory, pmem->size);
 +  BMLIB_TRACE_MUNMAP(pmem->u.device.mapped_memory, pmem->size);
    std::unique_lock<std::mutex> lock(ht_rw_mutex);
    ht_addr_fd.erase(pmem->u.device.dmabuf_fd);
    ht_addr_mapped_addr.erase((uintptr_t)(pmem->u.device.mapped_memory));
-@@ -1262,16 +1347,17 @@ bm_status_t bm_mem_mmap_device_mem(bm_handle_t handle, bm_device_mem_t *dmem,
- 
-   unsigned int size = bm_mem_get_device_size(*dmem);
-   unsigned int aligned_size = (size + PAGE_SIZE - 1) & (~(PAGE_SIZE - 1));
--  bmlib_log(BMLIB_MEMORY_LOG_TAG, BMLIB_LOG_DEBUG, "inner_offset=%d, size=%d\n", (int)inner_offset, size);
--  ret = mmap(NULL, aligned_size, PROT_READ | PROT_WRITE, MAP_SHARED,
--              dmem->u.device.dmabuf_fd, inner_offset);
-+  bmlib_log(BMLIB_MEMORY_LOG_TAG, BMLIB_LOG_DEBUG, "inner_offset=%d, size=%d\n",
-+            (int)inner_offset, size);
-+  ret = BMLIB_TRACE_MMAP(NULL, aligned_size, PROT_READ | PROT_WRITE, MAP_SHARED,
-+                         dmem->u.device.dmabuf_fd, inner_offset);
-   if (MAP_FAILED != ret) {
-     *vmem = (u64)ret;
-     return BM_SUCCESS;
-   } else {
-     return BM_ERR_FAILURE;
-   }
--  #else
-+#else
-     #define GLOBAL_MEM_START_ADDR 0x100000000
-     //handle->bm_dev->get_global_memaddr_(handle->dev_id);
-   *vmem = (u64)((u8*)handle->bm_dev->get_global_memaddr_(handle->dev_id) +
-@@ -1312,15 +1398,22 @@ bm_status_t bm_mem_mmap_device_mem_u64(bm_handle_t handle, bm_device_mem_u64_t *
+@@ -1332,15 +1414,22 @@ bm_status_t bm_mem_mmap_device_mem_u64(bm_handle_t handle, bm_device_mem_u64_t *
      }
    }
    lock.unlock();
@@ -244,18 +183,18 @@ index bda63cc..5464198 100644
      return BM_SUCCESS;
    } else {
      bmlib_log(BMLIB_MEMORY_LOG_TAG, BMLIB_LOG_ERROR,
--        "===bm_mem_mmap_device_mem_u64 mmap failed, errno = %d (%s), device_addr=%x, fd=%d\n", 
+-        "bm_mem_mmap_device_mem_u64 mmap failed, errno = %d (%s), device_addr=%x, fd=%d\n", 
 -        errno, strerror(errno), 
 -        bm_mem_get_device_addr_u64(*dmem), 
 -        dmem->u.device.dmabuf_fd);
-+              "===bm_mem_mmap_device_mem_u64 mmap failed, errno = %d (%s), "
++              "bm_mem_mmap_device_mem_u64 mmap failed, errno = %d (%s), "
 +              "device_addr=%llx, fd=%d\n",
 +              errno, strerror(errno), bm_mem_get_device_addr_u64(*dmem),
 +              dmem->u.device.dmabuf_fd);
      return BM_ERR_FAILURE;
    }
  #else
-@@ -1356,8 +1449,9 @@ bm_status_t bm_mem_mmap_device_mem_no_cache(bm_handle_t handle,
+@@ -1376,8 +1465,9 @@ bm_status_t bm_mem_mmap_device_mem_no_cache(bm_handle_t handle,
    unsigned int size = bm_mem_get_device_size(*dmem);
    unsigned int aligned_size = (size + PAGE_SIZE - 1) & (~(PAGE_SIZE - 1));
  
@@ -267,7 +206,7 @@ index bda63cc..5464198 100644
  
    if (MAP_FAILED != ret) {
      *vmem = (u64)ret;
-@@ -1402,8 +1496,9 @@ bm_status_t bm_mem_mmap_device_mem_no_cache_u64(bm_handle_t handle,
+@@ -1422,8 +1512,9 @@ bm_status_t bm_mem_mmap_device_mem_no_cache_u64(bm_handle_t handle,
    unsigned long long size = bm_mem_get_device_size_u64(*dmem);
    unsigned long long aligned_size = (size + PAGE_SIZE - 1) & (~(PAGE_SIZE - 1));
  
@@ -279,40 +218,24 @@ index bda63cc..5464198 100644
  
    if (MAP_FAILED != ret) {
      *vmem = (u64)ret;
-@@ -1412,7 +1507,7 @@ bm_status_t bm_mem_mmap_device_mem_no_cache_u64(bm_handle_t handle,
-     return BM_ERR_FAILURE;
-   }
- 
--  #else
-+#else
-     //handle->bm_dev->get_global_memaddr_(handle->dev_id);
-   *vmem = (u64)((u8*)handle->bm_dev->get_global_memaddr_(handle->dev_id) +
-     bm_mem_get_device_addr_u64(*dmem) - handle->bm_dev->cmodel_get_gmem_start_addr_());
-@@ -1625,7 +1720,7 @@ bm_status_t bm_mem_unmap_device_mem(bm_handle_t handle, void *vmem, int size) {
-     return BM_ERR_FAILURE;
+@@ -1655,7 +1746,7 @@ bm_status_t bm_mem_unmap_device_mem(bm_handle_t handle, void *vmem, int size) {
    }
    unsigned int aligned_size = (size + PAGE_SIZE - 1) & (~(PAGE_SIZE - 1));
--  (void)munmap(vmem, aligned_size);
-+  (void)BMLIB_TRACE_MUNMAP(vmem, aligned_size);
- #else
-   UNUSED(handle);
-   UNUSED(vmem);
-@@ -1643,12 +1738,12 @@ bm_status_t bm_mem_unmap_device_mem_u64(bm_handle_t handle, void *vmem, u64 size
-     return BM_ERR_FAILURE;
+   errno = 0;
+-  int munmap_ret = munmap(vmem, aligned_size);
++  int munmap_ret = BMLIB_TRACE_MUNMAP(vmem, aligned_size);
+   int saved_errno = errno;
+   bmlib_log(BMLIB_MEMORY_LOG_TAG,
+             munmap_ret == 0 ? BMLIB_LOG_INFO : BMLIB_LOG_WARNING,
+@@ -1689,7 +1780,7 @@ bm_status_t bm_mem_unmap_device_mem_u64(bm_handle_t handle, void *vmem, u64 size
    }
    unsigned long long aligned_size = (size + PAGE_SIZE - 1) & (~(PAGE_SIZE - 1));
--  (void)munmap(vmem, aligned_size);
--  #else
-+  (void)BMLIB_TRACE_MUNMAP(vmem, aligned_size);
-+#else
-   UNUSED(handle);
-   UNUSED(vmem);
-   UNUSED(size);
--  #endif
-+#endif
-   return BM_SUCCESS;
- }
- 
+   errno = 0;
+-  int munmap_ret = munmap(vmem, aligned_size);
++  int munmap_ret = BMLIB_TRACE_MUNMAP(vmem, aligned_size);
+   int saved_errno = errno;
+   bmlib_log(BMLIB_MEMORY_LOG_TAG,
+             munmap_ret == 0 ? BMLIB_LOG_INFO : BMLIB_LOG_WARNING,
+
 -- 
 2.25.1
-
