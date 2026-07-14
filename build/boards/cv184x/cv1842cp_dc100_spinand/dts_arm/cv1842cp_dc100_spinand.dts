@@ -178,4 +178,6 @@
 	};
 };
 
-
+&sd {
+	cvi,no-pwr-en-pin; /* PWR_EN引脚被TP复用为中断GPIO，SD常供电 */
+};
