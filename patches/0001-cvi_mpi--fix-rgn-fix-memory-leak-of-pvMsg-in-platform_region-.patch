@@ -1,0 +1,110 @@
+From 895ebb64b8794b0c035c020298219c43122c86f1 Mon Sep 17 00:00:00 2001
+From: "xiu.yang" <xiu.yang@sophgo.com>
+Date: Mon, 20 Jul 2026 11:31:53 +0800
+Subject: [PATCH] fix(rgn): fix memory leak of pvMsg in platform_region dual_os
+ functions
+
+[description ]:
+- Add free(pvMsg) before early return on error path in platform_rgn_attachtochn.
+- Add free(pvMsg) on success path in platform_rgn_attachtochn.
+- Add free(pvMsg) before early return on error path in platform_rgn_setdisplayattr.
+- Add free(pvMsg) on success path in platform_rgn_setdisplayattr.
+- Add free(pvMsg) before early return on error path in platform_rgn_setchnpalette.
+
+[root   cause]:
+- pvMsg was allocated via malloc but never freed before function return.
+- Both error and success paths leaked the buffer, causing cumulative memory loss on repeated RGN attach/setdisplayattr/setchnpalette calls in dual_os mode.
+
+[JIRA      ID]:CV184XSDK-1383
+[chip project]:184x
+[side effects]:
+- Only affects dual_os platform RGN path.
+- Verified no double-free: each return path now frees exactly once.
+- No observed side effects on normal RGN operations.
+
+[Affected *.ko/*.so/*.a] :libcvi_vcodec.so
+
+Change-Id: I0d76382dc7ac12fefb119b25b1cf209fec890ca2
+---
+ .../rgn/platform/dual_os/platform_region.c    | 51 ++++++++++---------
+ 1 file changed, 28 insertions(+), 23 deletions(-)
+
+diff --git a/modules/rgn/platform/dual_os/platform_region.c b/modules/rgn/platform/dual_os/platform_region.c
+index 6cee073..7027aee 100644
+--- a/modules/rgn/platform/dual_os/platform_region.c
++++ b/modules/rgn/platform/dual_os/platform_region.c
+@@ -232,13 +232,15 @@ CVI_S32 platform_rgn_attachtochn(RGN_HANDLE Handle, const MMF_CHN_S *pstChn, con
+ 	memcpy(pvMsg, (CVI_VOID *)pstChn, sizeof(MMF_CHN_S));
+ 	memcpy(pvMsg +  sizeof(MMF_CHN_S), (CVI_VOID *)pstChnAttr, sizeof(RGN_CHN_ATTR_S));
+ 
+-	s32Ret = CVI_MSG_SendSync(fd, MSG_CMD_RGN_ATTACH_TO_CHN,
+-				pvMsg, u32Len, &stPrivData);
+-	if (s32Ret != CVI_SUCCESS) {
+-		CVI_TRACE_RGN(CVI_DBG_ERR, "Attach RGN to channel fail.\n");
+-		return s32Ret;
+-	}
+-	return CVI_SUCCESS;
++        s32Ret = CVI_MSG_SendSync(fd, MSG_CMD_RGN_ATTACH_TO_CHN, pvMsg, u32Len,
++                                  &stPrivData);
++        if (s32Ret != CVI_SUCCESS) {
++          CVI_TRACE_RGN(CVI_DBG_ERR, "Attach RGN to channel fail.\n");
++          free(pvMsg);
++          return s32Ret;
++        }
++        free(pvMsg);
++        return CVI_SUCCESS;
+ }
+ 
+ CVI_S32 platform_rgn_detachfromchn(RGN_HANDLE Handle, const MMF_CHN_S *pstChn)
+@@ -291,14 +293,16 @@ CVI_S32 platform_rgn_setdisplayattr(RGN_HANDLE Handle, const MMF_CHN_S *pstChn,
+ 
+ 	// Driver control
+ 	fd = get_rgn_fd();
+-	s32Ret = CVI_MSG_SendSync(fd, MSG_CMD_RGN_SET_DISP_ATTR,
+-				pvMsg, u32Len, &stPrivData);
+-	if (s32Ret != CVI_SUCCESS) {
+-		CVI_TRACE_RGN(CVI_DBG_ERR, "Set display RGN attributes fail.\n");
+-		return s32Ret;
+-	}
+-
+-	return CVI_SUCCESS;
++        s32Ret = CVI_MSG_SendSync(fd, MSG_CMD_RGN_SET_DISP_ATTR, pvMsg, u32Len,
++                                  &stPrivData);
++        if (s32Ret != CVI_SUCCESS) {
++          CVI_TRACE_RGN(CVI_DBG_ERR, "Set display RGN attributes fail.\n");
++          free(pvMsg);
++          return s32Ret;
++        }
++
++        free(pvMsg);
++        return CVI_SUCCESS;
+ }
+ 
+ CVI_S32 platform_rgn_getdisplayattr(RGN_HANDLE Handle, const MMF_CHN_S *pstChn, RGN_CHN_ATTR_S *pstChnAttr)
+@@ -720,14 +724,15 @@ CVI_S32 platform_rgn_setchnpalette(RGN_HANDLE Handle, const MMF_CHN_S *pstChn, R
+ 	memcpy(pvMsg +  sizeof(MMF_CHN_S), (CVI_VOID *)pstPalette, sizeof(RGN_PALETTE_S));
+ 	memcpy(pvMsg +  sizeof(MMF_CHN_S) + sizeof(RGN_PALETTE_S), (CVI_VOID *)pstPalette->pstPaletteTable,
+ 			sizeof(RGN_RGBQUARD_S) * pstPalette->lut_length);
+-	s32Ret = CVI_MSG_SendSync(fd, MSG_CMD_RGN_SET_CHN_PALETTE,
+-				pvMsg, u32Len, &stPrivData);
+-	if (s32Ret != CVI_SUCCESS) {
+-		CVI_TRACE_RGN(CVI_DBG_ERR, "Set chn palette fail.\n");
+-		return s32Ret;
+-	}
+-
+-	free(pvMsg);
++        s32Ret = CVI_MSG_SendSync(fd, MSG_CMD_RGN_SET_CHN_PALETTE, pvMsg,
++                                  u32Len, &stPrivData);
++        if (s32Ret != CVI_SUCCESS) {
++          CVI_TRACE_RGN(CVI_DBG_ERR, "Set chn palette fail.\n");
++          free(pvMsg);
++          return s32Ret;
++        }
++
++        free(pvMsg);
+ 	pvMsg = NULL;
+ 	return s32Ret;
+ }
+-- 
+2.25.1
+
