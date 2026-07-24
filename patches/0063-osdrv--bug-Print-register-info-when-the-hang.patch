@@ -1,0 +1,222 @@
+From 5cd5a2ef9c9d2492e01a00f2a1363ec2e2a48797 Mon Sep 17 00:00:00 2001
+From: "weiyong.luo" <weiyong.luo@sophgo.com>
+Date: Fri, 24 Jul 2026 11:04:38 +0800
+Subject: [PATCH] [bug]: Print register info when the hang.
+
+[description ]: NA
+[root cause  ]: NA
+[jira id     ]: NA
+[chip project]: cv184x
+[side effects]: NA
+[Affected]: NA
+
+Change-Id: I3ffd329051f11e0a43555abd58659f0496ef9b44
+---
+ interdrv/tde/chip/cv184x/tde_ip_ctrl.c |  5 ++
+ interdrv/tde/chip/cv184x/tde_ip_ctrl.h |  2 +
+ interdrv/tde/chip/cv184x/tde_reg.c     | 79 ++++++++++++++++++++++++++
+ interdrv/tde/chip/cv184x/tde_reg.h     |  2 +
+ interdrv/tde/driver/tde_core.c         | 34 +++++++++++
+ interdrv/tde/platform/linux/tde_proc.c |  3 +-
+ 6 files changed, 124 insertions(+), 1 deletion(-)
+
+diff --git a/interdrv/tde/chip/cv184x/tde_ip_ctrl.c b/interdrv/tde/chip/cv184x/tde_ip_ctrl.c
+index b5198960..9c616953 100644
+--- a/interdrv/tde/chip/cv184x/tde_ip_ctrl.c
++++ b/interdrv/tde/chip/cv184x/tde_ip_ctrl.c
+@@ -110,3 +110,8 @@ void tde_ip_reset(void)
+ 	tde_toggle_reset();
+ }
+ 
++void tde_ip_dump_status(void)
++{
++	tde_dump_reg();
++}
++
+diff --git a/interdrv/tde/chip/cv184x/tde_ip_ctrl.h b/interdrv/tde/chip/cv184x/tde_ip_ctrl.h
+index ce179e45..d323e73a 100644
+--- a/interdrv/tde/chip/cv184x/tde_ip_ctrl.h
++++ b/interdrv/tde/chip/cv184x/tde_ip_ctrl.h
+@@ -29,5 +29,7 @@ void tde_ip_deinit(void);
+ u32 tde_ip_clear_intr(void);
+ void tde_ip_reset(void);
+ 
++void tde_ip_dump_status(void);
++
+ 
+ #endif
+diff --git a/interdrv/tde/chip/cv184x/tde_reg.c b/interdrv/tde/chip/cv184x/tde_reg.c
+index ba9cbc24..813891bb 100644
+--- a/interdrv/tde/chip/cv184x/tde_reg.c
++++ b/interdrv/tde/chip/cv184x/tde_reg.c
+@@ -97,4 +97,83 @@ void tde_toggle_reset(void)
+ 	osal_iounmap(vi_sys_addr, 4);
+ }
+ 
++u32 read_isp_top_clk(void)
++{
++	void *clk_addr = NULL;
++	u32 mask = BIT(9);
++	u32 value;
++
++	clk_addr = osal_ioremap((unsigned long)0x30020f0, 4);
++	if (!clk_addr) {
++		TRACE_TDE(DBG_ERR, "osal_ioremap fail.\n");
++		return 0;
++	}
++
++	value = _reg_read((uintptr_t)clk_addr);
++	osal_iounmap(clk_addr, 4);
++
++	return value & mask;
++}
++
++void tde_dump_reg(void)
++{
++	TRACE_TDE(DBG_ERR, "===== TDE reg dump =====\n");
++	TRACE_TDE(DBG_ERR, "SURFACE_REG0          [0x%02x]: 0x%08x\n",
++		TDE_REG_SURFACE_REG0, _reg_read(reg_base + TDE_REG_SURFACE_REG0));
++	TRACE_TDE(DBG_ERR, "SRC_SURFACE_ADDR_L    [0x%02x]: 0x%08x\n",
++		TDE_REG_SRC_SURFACE_ADDR_L, _reg_read(reg_base + TDE_REG_SRC_SURFACE_ADDR_L));
++	TRACE_TDE(DBG_ERR, "SRC_SURFACE_ADDR_H    [0x%02x]: 0x%08x\n",
++		TDE_REG_SRC_SURFACE_ADDR_H, _reg_read(reg_base + TDE_REG_SRC_SURFACE_ADDR_H));
++	TRACE_TDE(DBG_ERR, "SRC_SURFACE_PIXEL_4B  [0x%02x]: 0x%08x\n",
++		TDE_REG_SRC_SURFACE_PIXEL_4B, _reg_read(reg_base + TDE_REG_SRC_SURFACE_PIXEL_4B));
++	TRACE_TDE(DBG_ERR, "SRC_SURFACE_PIXEL_2B  [0x%02x]: 0x%08x\n",
++		TDE_REG_SRC_SURFACE_PIXEL_2B, _reg_read(reg_base + TDE_REG_SRC_SURFACE_PIXEL_2B));
++	TRACE_TDE(DBG_ERR, "SRC_SURFACE_STRIDE    [0x%02x]: 0x%08x\n",
++		TDE_REG_SRC_SURFACE_STRIDE, _reg_read(reg_base + TDE_REG_SRC_SURFACE_STRIDE));
++	TRACE_TDE(DBG_ERR, "SRC_SURFACE_WIDTH     [0x%02x]: 0x%08x\n",
++		TDE_REG_SRC_SURFACE_WIDTH, _reg_read(reg_base + TDE_REG_SRC_SURFACE_WIDTH));
++	TRACE_TDE(DBG_ERR, "SRC_SURFACE_HEIGHT    [0x%02x]: 0x%08x\n",
++		TDE_REG_SRC_SURFACE_HEIGHT, _reg_read(reg_base + TDE_REG_SRC_SURFACE_HEIGHT));
++	TRACE_TDE(DBG_ERR, "DST_SURFACE_ADDR_L    [0x%02x]: 0x%08x\n",
++		TDE_REG_DST_SURFACE_ADDR_L, _reg_read(reg_base + TDE_REG_DST_SURFACE_ADDR_L));
++	TRACE_TDE(DBG_ERR, "DST_SURFACE_ADDR_H    [0x%02x]: 0x%08x\n",
++		TDE_REG_DST_SURFACE_ADDR_H, _reg_read(reg_base + TDE_REG_DST_SURFACE_ADDR_H));
++	TRACE_TDE(DBG_ERR, "DST_SURFACE_WIDTH     [0x%02x]: 0x%08x\n",
++		TDE_REG_DST_SURFACE_WIDTH, _reg_read(reg_base + TDE_REG_DST_SURFACE_WIDTH));
++	TRACE_TDE(DBG_ERR, "DST_SURFACE_HEIGHT    [0x%02x]: 0x%08x\n",
++		TDE_REG_DST_SURFACE_HEIGHT, _reg_read(reg_base + TDE_REG_DST_SURFACE_HEIGHT));
++	TRACE_TDE(DBG_ERR, "DST_SURFACE_STRIDE    [0x%02x]: 0x%08x\n",
++		TDE_REG_DST_SURFACE_STRIDE, _reg_read(reg_base + TDE_REG_DST_SURFACE_STRIDE));
++	TRACE_TDE(DBG_ERR, "DRAW_LINE_CTRL0       [0x%02x]: 0x%08x\n",
++		TDE_REG_DRAW_LINE_CTRL0, _reg_read(reg_base + TDE_REG_DRAW_LINE_CTRL0));
++	TRACE_TDE(DBG_ERR, "DRAW_LINE_CTRL1       [0x%02x]: 0x%08x\n",
++		TDE_REG_DRAW_LINE_CTRL1, _reg_read(reg_base + TDE_REG_DRAW_LINE_CTRL1));
++	TRACE_TDE(DBG_ERR, "DRAW_LINE_CTRL2       [0x%02x]: 0x%08x\n",
++		TDE_REG_DRAW_LINE_CTRL2, _reg_read(reg_base + TDE_REG_DRAW_LINE_CTRL2));
++	TRACE_TDE(DBG_ERR, "DRAW_LINE_CTRL3       [0x%02x]: 0x%08x\n",
++		TDE_REG_DRAW_LINE_CTRL3, _reg_read(reg_base + TDE_REG_DRAW_LINE_CTRL3));
++	TRACE_TDE(DBG_ERR, "DRAW_LINE_CTRL4       [0x%02x]: 0x%08x\n",
++		TDE_REG_DRAW_LINE_CTRL4, _reg_read(reg_base + TDE_REG_DRAW_LINE_CTRL4));
++	TRACE_TDE(DBG_ERR, "DRAW_LINE_CTRL5       [0x%02x]: 0x%08x\n",
++		TDE_REG_DRAW_LINE_CTRL5, _reg_read(reg_base + TDE_REG_DRAW_LINE_CTRL5));
++	TRACE_TDE(DBG_ERR, "SHADOW_RD_SEL         [0x%02x]: 0x%08x\n",
++		TDE_REG_SHADOW_RD_SEL, _reg_read(reg_base + TDE_REG_SHADOW_RD_SEL));
++	TRACE_TDE(DBG_ERR, "START_CTRL            [0x%02x]: 0x%08x\n",
++		TDE_REG_START_CTRL, _reg_read(reg_base + TDE_REG_START_CTRL));
++	TRACE_TDE(DBG_ERR, "DBG_BUS               [0x%02x]: 0x%08x\n",
++		TDE_REG_DBG_BUS, _reg_read(reg_base + TDE_REG_DBG_BUS));
++	TRACE_TDE(DBG_ERR, "CLK_GATE              [0x%02x]: 0x%08x\n",
++		TDE_REG_CLK_GATE, _reg_read(reg_base + TDE_REG_CLK_GATE));
++	TRACE_TDE(DBG_ERR, "INTR_STATUS           [0x%02x]: 0x%08x\n",
++		TDE_REG_INTR_STATUS, _reg_read(reg_base + TDE_REG_INTR_STATUS));
++	TRACE_TDE(DBG_ERR, "INTR_CLEAR            [0x%02x]: 0x%08x\n",
++		TDE_REG_INTR_CLEAR, _reg_read(reg_base + TDE_REG_INTR_CLEAR));
++	TRACE_TDE(DBG_ERR, "BW_LIMIT_RD           [0x%02x]: 0x%08x\n",
++		TDE_REG_BW_LIMIT_RD, _reg_read(reg_base + TDE_REG_BW_LIMIT_RD));
++	TRACE_TDE(DBG_ERR, "BW_LIMIT_WR           [0x%02x]: 0x%08x\n",
++		TDE_REG_BW_LIMIT_WR, _reg_read(reg_base + TDE_REG_BW_LIMIT_WR));
++
++	TRACE_TDE(DBG_ERR, "---isp top clk is %s.\n", read_isp_top_clk() ? "open" : "close");
++}
++
+ 
+diff --git a/interdrv/tde/chip/cv184x/tde_reg.h b/interdrv/tde/chip/cv184x/tde_reg.h
+index cd74df91..ed338893 100644
+--- a/interdrv/tde/chip/cv184x/tde_reg.h
++++ b/interdrv/tde/chip/cv184x/tde_reg.h
+@@ -39,4 +39,6 @@ u32 tde_intr_status(void);
+ void tde_clear_intr(void);
+ void tde_toggle_reset(void);
+ 
++void tde_dump_reg(void);
++
+ #endif
+diff --git a/interdrv/tde/driver/tde_core.c b/interdrv/tde/driver/tde_core.c
+index 16c3a212..f951036b 100644
+--- a/interdrv/tde/driver/tde_core.c
++++ b/interdrv/tde/driver/tde_core.c
+@@ -3,6 +3,39 @@
+ #include "tde_ip_ctrl.h"
+ #include "base_ctx.h"
+ 
++static void _tde_status(struct tde_job *job)
++{
++	struct tde_task *task;
++	int idx = 0;
++
++	TRACE_TDE(DBG_ERR, "===== job status =====\n");
++	TRACE_TDE(DBG_ERR, "hdl(%d), task_cnt(%d), is_sync(%d), is_block(%d)\n",
++		job->hdl, osal_atomic_read(&job->task_cnt), job->is_sync, job->is_block);
++
++	osal_mutex_lock(&job->lock);
++	osal_list_for_each_entry(task, &job->task_list, item) {
++		TRACE_TDE(DBG_ERR, "pending task[%d]: mode(%d)\n", idx, task->mode);
++		TRACE_TDE(DBG_ERR, "  src: w(%d) h(%d) stride(%d) addr(%llx) fmt(%d)\n",
++			task->src.width, task->src.height, task->src.stride,
++			task->src.phy_addr, task->src.color_fmt);
++		TRACE_TDE(DBG_ERR, "  dst: w(%d) h(%d) stride(%d) addr(%llx) fmt(%d)\n",
++			task->dst.width, task->dst.height, task->dst.stride,
++			task->dst.phy_addr, task->dst.color_fmt);
++		if (task->mode == TDE_TASK_DRAW_LINE) {
++			TRACE_TDE(DBG_ERR, "  line: start(%d,%d) end(%d,%d) color(%x) thick(%d)\n",
++				task->line.start_x, task->line.start_y,
++				task->line.end_x, task->line.end_y,
++				task->line.color, task->line.thick);
++		}
++		idx++;
++	}
++	osal_mutex_unlock(&job->lock);
++
++	TRACE_TDE(DBG_ERR, "pending task count in list(%d)\n", idx);
++
++	tde_ip_dump_status();
++}
++
+ static void _tde_remove_task(struct tde_job *job)
+ {
+ 	struct tde_task *task;
+@@ -71,6 +104,7 @@ static void _tde_job_process(struct tde_job *job, osal_semaphore *sem)
+ 		ret = osal_sem_down_timeout(sem, timeout);
+ 		if (ret != OSAL_SUCCESS) {
+ 			TRACE_TDE(DBG_ERR, "TDE timeout, HW hang.\n");
++			_tde_status(job);
+ 			tde_ip_reset();
+ 			_tde_remove_task(job);
+ 			break;
+diff --git a/interdrv/tde/platform/linux/tde_proc.c b/interdrv/tde/platform/linux/tde_proc.c
+index f5b69874..93827805 100644
+--- a/interdrv/tde/platform/linux/tde_proc.c
++++ b/interdrv/tde/platform/linux/tde_proc.c
+@@ -5,6 +5,7 @@
+ 
+ #include "tde_debug.h"
+ #include "tde_core.h"
++#include "tde_ip_ctrl.h"
+ 
+ 
+ #define TDE_PROC_NAME          "soph/tde"
+@@ -18,7 +19,7 @@ static int proc_tde_mode;
+ 
+ int tde_ctx_proc_show(struct seq_file *m, void *v)
+ {
+-	//todo
++	tde_ip_dump_status();
+ 	return 0;
+ }
+ 
+-- 
+2.25.1
+
