@@ -1,0 +1,229 @@
+From 20aa7f632568be08ce13b1aa76a506a253de77c4 Mon Sep 17 00:00:00 2001
+From: "xiu.yang" <xiu.yang@sophgo.com>
+Date: Fri, 24 Jul 2026 08:26:15 +0800
+Subject: [PATCH] fix:add logs for vo
+
+Change-Id: I3def4571eeb3ab751db7518943e3df27f9a3aa88
+---
+ interdrv/vo/driver/vo_process.c | 188 +++++++++++++++++---------------
+ 1 file changed, 101 insertions(+), 87 deletions(-)
+
+diff --git a/interdrv/vo/driver/vo_process.c b/interdrv/vo/driver/vo_process.c
+index 49e03c50..58f362d1 100644
+--- a/interdrv/vo/driver/vo_process.c
++++ b/interdrv/vo/driver/vo_process.c
+@@ -702,47 +702,59 @@ int vo_recv_frame(mmf_chn_s chn, vb_blk blk, void *data)
+ 	struct vo_chn_ctx *chn_ctx;
+ 	struct vb_jobs_t *jobs;
+ 	struct vb_s *vb = (struct vb_s *)(uintptr_t)blk;
+-	frame_rate_ctrl_s chn_frame_ctrl;
+-	size_s size;
+-
+-	ret = check_vo_chn_valid(chn.dev_id, chn.chn_id);
+-	if (ret != 0)
+-		return ret;
+-
+-	if (g_vo_ctx->suspend) {
+-		TRACE_VO(DBG_WARN, "vo suspend do not recv frame.\n");
+-		return -1;
+-	}
+-
+-	layer_ctx = &g_vo_ctx->layer_ctx[chn.dev_id];
+-	chn_ctx = &layer_ctx->chn_ctx[chn.chn_id];
+-
+-	if (!chn_ctx->is_chn_enable) {
++        frame_rate_ctrl_s chn_frame_ctrl;
++        size_s size;
++
++        TRACE_VO(DBG_INFO, "vo_recv_frame 00.\n");
++        ret = check_vo_chn_valid(chn.dev_id, chn.chn_id);
++        if (ret != 0)
++          return ret;
++
++        TRACE_VO(DBG_INFO, "vo_recv_frame 01.\n");
++        if (g_vo_ctx->suspend) {
++          TRACE_VO(DBG_WARN, "vo suspend do not recv frame.\n");
++          return -1;
++        }
++        TRACE_VO(DBG_INFO, "vo_recv_frame 02.\n");
++        layer_ctx = &g_vo_ctx->layer_ctx[chn.dev_id];
++        chn_ctx = &layer_ctx->chn_ctx[chn.chn_id];
++
++        if (!chn_ctx->is_chn_enable) {
+ 		TRACE_VO(DBG_WARN, "layer(%d) chn(%d) disable.\n", chn.dev_id, chn.chn_id);
+-		return -1;
+-	}
+-
+-	chn_ctx->frame_index++;
+-	chn_ctx->src_frame_num++;
+-	layer_ctx->frame_index++;
+-	layer_ctx->src_frame_num++;
++                return -1;
++        }
++
++        TRACE_VO(DBG_INFO, "vo_recv_frame 03.\n");
++        chn_ctx->frame_index++;
++        chn_ctx->src_frame_num++;
++        layer_ctx->frame_index++;
++        layer_ctx->src_frame_num++;
+ 	chn_frame_ctrl.src_frame_rate = chn_ctx->src_frame_rate;
+ 	chn_frame_ctrl.dst_frame_rate = chn_ctx->frame_rate_user_set;
+ 	chn_ctx->is_drop = false;
+ 
+-	if (!FRC_INVALID(chn_frame_ctrl) && (!vo_frame_ctrl(chn_ctx->frame_index, &chn_frame_ctrl)))
+-		chn_ctx->is_drop = true;
+-
+-	if (chn_ctx->pause || chn_ctx->is_drop)
+-		return 0;
+-
+-	if (layer_ctx->layer_attr.pixformat != vb->buf.pixel_format) {
+-		TRACE_VO(DBG_ERR, "layer(%d) chn(%d) PixelFormat(%d) mismatch.\n",
+-			 chn.dev_id, chn.chn_id, vb->buf.pixel_format);
+-		return -1;
+-	}
+-
+-	if ((chn_ctx->rotation == ROTATION_90) || (chn_ctx->rotation == ROTATION_270)) {
++        if (!FRC_INVALID(chn_frame_ctrl) &&
++            (!vo_frame_ctrl(chn_ctx->frame_index, &chn_frame_ctrl)))
++          chn_ctx->is_drop = true;
++
++        TRACE_VO(
++            DBG_INFO,
++            "vo_recv_frame 0033, chn_ctx->pause is %d, "
++            "chn_frame_ctrl.src_frame_rate is %d, "
++            "chn_frame_ctrl.dst_frame_rate is %d, chn_ctx->is_drop is %d.\n",
++            chn_ctx->pause, chn_frame_ctrl.src_frame_rate,
++            chn_frame_ctrl.dst_frame_rate, chn_ctx->is_drop);
++        if (chn_ctx->pause || chn_ctx->is_drop)
++          return 0;
++        TRACE_VO(DBG_INFO, "vo_recv_frame 04.\n");
++
++        if (layer_ctx->layer_attr.pixformat != vb->buf.pixel_format) {
++          TRACE_VO(DBG_ERR, "layer(%d) chn(%d) PixelFormat(%d) mismatch.\n",
++                   chn.dev_id, chn.chn_id, vb->buf.pixel_format);
++          return -1;
++        }
++
++        if ((chn_ctx->rotation == ROTATION_90) || (chn_ctx->rotation == ROTATION_270)) {
+ 		size.width = layer_ctx->layer_attr.img_size.height;
+ 		size.height = layer_ctx->layer_attr.img_size.width;
+ 	} else
+@@ -763,62 +775,64 @@ int vo_recv_frame(mmf_chn_s chn, vb_blk blk, void *data)
+ 			 vb->buf.offset_left, vb->buf.offset_right,
+ 			 vb->buf.offset_top, vb->buf.offset_bottom);
+ 		return ERR_VO_ILLEGAL_PARAM;
+-	}
+-
+-	if (chn_ctx->rotation != ROTATION_0) {
+-		if (!osal_atomic_cmpxchg(&chn_ctx->mesh.gdc_flag, 0, 1)) {
+-			struct _vo_gdc_cb_param cb_param = { .chn = chn, .usage = GDC_USAGE_LDC};
+-
+-			osal_atomic_inc_return(&vb->usr_cnt);
+-			osal_atomic_fetch_or(BIT(ID_GDC), &vb->mod_ids);
+-
+-			if (_mesh_gdc_do_op_cb(GDC_USAGE_ROTATION
+-				, NULL
+-				, vb
+-				, g_vo_ctx->layer_ctx[chn.dev_id].layer_attr.pixformat
+-				, chn_ctx->mesh.paddr
+-				, false, &cb_param
+-				, sizeof(cb_param)
+-				, ID_VO
+-				, chn_ctx->rotation) != 0) {
+-				osal_atomic_set(&chn_ctx->mesh.gdc_flag, 0);
+-				TRACE_VO(DBG_ERR, "gdc rotation failed.\n");
+-				return -1;
+-			}
+-
+-			TRACE_VO(DBG_DEBUG, "layer(%d) chn(%d) push vb(0x%llx) to gdc job.\n",
+-				 chn.dev_id, chn.chn_id, vb->phy_addr);
+-
+-			return 0;
+-		}
+-
+-		TRACE_VO(DBG_ERR, "layer(%d) chn(%d) drop frame due to gdc op blocked.\n",
+-			 chn.dev_id, chn.chn_id);
+-		return -1;
+-	}
+-
+-
+-	osal_mutex_lock(&layer_ctx->layer_lock);
++        }
++
++        if (chn_ctx->rotation != ROTATION_0) {
++          TRACE_VO(DBG_INFO, "vo_recv_frame 05.\n");
++          if (!osal_atomic_cmpxchg(&chn_ctx->mesh.gdc_flag, 0, 1)) {
++            struct _vo_gdc_cb_param cb_param = {.chn = chn,
++                                                .usage = GDC_USAGE_LDC};
++
++            osal_atomic_inc_return(&vb->usr_cnt);
++            osal_atomic_fetch_or(BIT(ID_GDC), &vb->mod_ids);
++
++            if (_mesh_gdc_do_op_cb(
++                    GDC_USAGE_ROTATION, NULL, vb,
++                    g_vo_ctx->layer_ctx[chn.dev_id].layer_attr.pixformat,
++                    chn_ctx->mesh.paddr, false, &cb_param, sizeof(cb_param),
++                    ID_VO, chn_ctx->rotation) != 0) {
++              osal_atomic_set(&chn_ctx->mesh.gdc_flag, 0);
++              TRACE_VO(DBG_ERR, "gdc rotation failed.\n");
++              return -1;
++            }
++
++            TRACE_VO(DBG_DEBUG,
++                     "layer(%d) chn(%d) push vb(0x%llx) to gdc job.\n",
++                     chn.dev_id, chn.chn_id, vb->phy_addr);
++
++            TRACE_VO(DBG_INFO, "vo_recv_frame 06.\n");
++            return 0;
++          }
++
++          TRACE_VO(DBG_ERR,
++                   "layer(%d) chn(%d) drop frame due to gdc op blocked.\n",
++                   chn.dev_id, chn.chn_id);
++          return -1;
++        }
++
++        osal_mutex_lock(&layer_ctx->layer_lock);
+ 
+ 	jobs = &chn_ctx->chn_jobs;
+ 	osal_mutex_lock(&jobs->lock);
+ 	if (!jobs->inited) {
+ 		osal_mutex_unlock(&jobs->lock);
+-		osal_mutex_unlock(&layer_ctx->layer_lock);
+-		TRACE_VO(DBG_NOTICE, "layer(%d) chn(%d) jobs not initialized yet.\n",
+-				chn.dev_id, chn.chn_id);
+-		return -1;
+-	}
+-	if (FIFO_FULL(&jobs->waitq)) {
+-		struct vb_s *vb_old = NULL;
+-		TRACE_VO(DBG_ERR, "layer(%d) chn(%d) waitq full, drop frame.\n",
+-			     chn.dev_id, chn.chn_id);
+-		FIFO_POP(&jobs->waitq, &vb_old);
+-		osal_atomic_fetch_and(~BIT(chn.mod_id), &vb_old->mod_ids);
+-		vb_release_block((vb_blk)(uintptr_t)vb_old);
+-	}
+-
+-	chn_ctx->frame_num++;
++                osal_mutex_unlock(&layer_ctx->layer_lock);
++                TRACE_VO(DBG_NOTICE,
++                         "layer(%d) chn(%d) jobs not initialized yet.\n",
++                         chn.dev_id, chn.chn_id);
++                TRACE_VO(DBG_INFO, "vo_recv_frame 06.\n");
++                return -1;
++        }
++        if (FIFO_FULL(&jobs->waitq)) {
++          struct vb_s *vb_old = NULL;
++          TRACE_VO(DBG_ERR, "layer(%d) chn(%d) waitq full, drop frame.\n",
++                   chn.dev_id, chn.chn_id);
++          FIFO_POP(&jobs->waitq, &vb_old);
++          osal_atomic_fetch_and(~BIT(chn.mod_id), &vb_old->mod_ids);
++          vb_release_block((vb_blk)(uintptr_t)vb_old);
++        }
++
++        chn_ctx->frame_num++;
+ 	layer_ctx->frame_num++;
+ 
+ 	FIFO_PUSH(&jobs->waitq, vb);
+-- 
+2.25.1
+
