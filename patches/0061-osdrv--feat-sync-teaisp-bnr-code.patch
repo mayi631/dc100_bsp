@@ -1,19 +1,19 @@
-From 5d73f2cb846bd537b285a3287e95b6a9212f8647 Mon Sep 17 00:00:00 2001
+From 1130087d8f9a136809633574bad5fbd71f150d79 Mon Sep 17 00:00:00 2001
 From: "xiaole.chen" <xiaole.chen@sophgo.com>
 Date: Fri, 24 Apr 2026 19:05:04 +0800
-Subject: [PATCH 67/84] [feat](vi): sync teaisp bnr code [description ]:NA
- [root   cause]:NA [JIRA      ID]:NA [chip project]:cv184x
+Subject: [PATCH] [feat](vi): sync teaisp bnr code [description ]:NA [root  
+ cause]:NA [JIRA      ID]:NA [chip project]:cv184x
 
 Change-Id: Ieca9b60f57d173556fa00356c5aa1de6d2029a17
 ---
- interdrv/vi/driver/vi.c           | 222 +++++++++++++++++++++---------
- interdrv/vi/driver/vi_dma_setup.c |  63 +++++----
- interdrv/vi/driver/vi_ioctl.c     |   6 +-
+ interdrv/vi/driver/vi.c           | 220 +++++++++++++++++++++---------
+ interdrv/vi/driver/vi_dma_setup.c |  61 +++++----
+ interdrv/vi/driver/vi_ioctl.c     |   1 +
  interdrv/vi/driver/vi_sdk_layer.c |  15 +-
- 4 files changed, 202 insertions(+), 104 deletions(-)
+ 4 files changed, 197 insertions(+), 100 deletions(-)
 
 diff --git a/interdrv/vi/driver/vi.c b/interdrv/vi/driver/vi.c
-index c661fe27..92691da8 100755
+index adb18909..92691da8 100755
 --- a/interdrv/vi/driver/vi.c
 +++ b/interdrv/vi/driver/vi.c
 @@ -1259,6 +1259,18 @@ void vi_csi_ctrl_init(struct vi_dev *vdev, enum sop_isp_raw raw_num)
@@ -134,15 +134,6 @@ index c661fe27..92691da8 100755
  
  	while (fe_chn <= fe_max) {
  		in_buf = isp_buf_next(&vdev->pre_ai_isp_in_q[raw_num][fe_chn]);
-@@ -3466,7 +3556,7 @@ static void _isp_ai_isp_handler(struct vi_dev *vdev, const enum sop_isp_raw raw_
- 
- 		ai_isp_info->input_addr[fe_chn] = in_buf->addr;
- 		ai_isp_info->output_addr[fe_chn] = out_buf->addr;
--		ai_isp_info->size = in_buf->byr_size;
-+		ai_isp_info->size = in_buf->size;
- 		fe_chn++;
- 	}
- 
 @@ -3502,21 +3592,33 @@ static void _isp_ai_isp_handler(struct vi_dev *vdev, const enum sop_isp_raw raw_
  			isp_buf_queue(post_in_q, in_buf);
  			vi_pr(VI_DBG, "AI_ISP skip raw %d, fe_chn %d\n", raw_num, fe_chn);
@@ -385,7 +376,7 @@ index c661fe27..92691da8 100755
 +}
 \ No newline at end of file
 diff --git a/interdrv/vi/driver/vi_dma_setup.c b/interdrv/vi/driver/vi_dma_setup.c
-index 29382e19..1f68621b 100644
+index fa89f251..1f68621b 100644
 --- a/interdrv/vi/driver/vi_dma_setup.c
 +++ b/interdrv/vi/driver/vi_dma_setup.c
 @@ -87,14 +87,14 @@ void _vi_yuv_get_dma_size(struct isp_ctx *ctx, const enum sop_isp_raw raw_num)
@@ -505,13 +496,7 @@ index 29382e19..1f68621b 100644
  			b = osal_vzalloc(sizeof(*b));
  			if (b == NULL) {
  				vi_pr(VI_ERR, "raw_le isp_buf_%d vmalloc size(%zu) fail\n", i, sizeof(*b));
-@@ -833,14 +844,14 @@ static int vi_get_ion_buf(struct vi_dev *vdev, bool is_csi,
- 	struct isp_ctx *ctx = &vdev->ctx;
- 	char buf_name[64] = {0};
- 
--	mempool->base = 0x80000000;
-+	mempool->base = 0x80000008;
- 	mempool->size = 0x40000000;
+@@ -838,9 +849,9 @@ static int vi_get_ion_buf(struct vi_dev *vdev, bool is_csi,
  	mempool->byteused = 0;
  
  	if (is_csi) {
@@ -525,7 +510,7 @@ index 29382e19..1f68621b 100644
  	} else {
  		_vi_get_pipe_dma_buf_size(ctx, idx);
 diff --git a/interdrv/vi/driver/vi_ioctl.c b/interdrv/vi/driver/vi_ioctl.c
-index 3468f7fe..e5c2959d 100644
+index 1de9c598..e5c2959d 100644
 --- a/interdrv/vi/driver/vi_ioctl.c
 +++ b/interdrv/vi/driver/vi_ioctl.c
 @@ -36,6 +36,7 @@ static int ai_isp_resolve_cfg(struct vi_dev *vdev, struct vi_ai_isp_cfg *cfg)
@@ -536,20 +521,6 @@ index 3468f7fe..e5c2959d 100644
  		break;
  	}
  	case AI_ISP_CFG_DISABLE:
-@@ -469,10 +470,11 @@ static long _vi_g_ctrl(struct vi_dev *vdev, struct vi_ctrl *ctrl)
- 
- 		osal_memcpy(ctrl->ptr, &vdev->ai_isp_info[pipe], sizeof(struct vi_ai_isp_info));
- 
--		vi_pr(VI_DBG, "AI_ISP_RAW: vi_pipe %d, raw_num %d, input(0x%llx, 0x%llx), output(0x%llx, 0x%llx)\n",
-+		vi_pr(VI_DBG, "AI_ISP_RAW: pipe %d, raw_%d, input(0x%llx, 0x%llx), output(0x%llx, 0x%llx) size(%d)\n",
- 				pipe, raw_num,
- 				vdev->ai_isp_info[pipe].input_addr[0], vdev->ai_isp_info[pipe].input_addr[1],
--				vdev->ai_isp_info[pipe].output_addr[0], vdev->ai_isp_info[pipe].output_addr[1]);
-+				vdev->ai_isp_info[pipe].output_addr[0], vdev->ai_isp_info[pipe].output_addr[1],
-+				vdev->ai_isp_info[pipe].size);
- 		rc = 0;
- 		break;
- 	}
 diff --git a/interdrv/vi/driver/vi_sdk_layer.c b/interdrv/vi/driver/vi_sdk_layer.c
 index e490ca4e..1e6b0364 100644
 --- a/interdrv/vi/driver/vi_sdk_layer.c
