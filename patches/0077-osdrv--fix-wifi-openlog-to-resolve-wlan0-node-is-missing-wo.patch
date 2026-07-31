@@ -1,7 +1,7 @@
-From 9be27bd6d5cf473708cf6571f40814954ebf1e3f Mon Sep 17 00:00:00 2001
+From f62f5c501a2957d03379a6a9cc53549e0611d333 Mon Sep 17 00:00:00 2001
 From: "song.yu" <song.yu@sophgo.com>
 Date: Wed, 5 Nov 2025 09:52:53 +0800
-Subject: [PATCH] fix(wifi): openlog to resolve wlan0 node is missing,
+Subject: [PATCH 77/84] fix(wifi): openlog to resolve wlan0 node is missing,
  workaround
 
 Change-Id: I09f5e834c53af97542931b94c10bd672fa721d0d

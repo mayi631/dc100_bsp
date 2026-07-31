@@ -1,7 +1,7 @@
-From 6bc16d04f47a818ae955bf0a8367ea415710c13a Mon Sep 17 00:00:00 2001
+From 990c2ccc216d82ed78757393f4a51081408bc85a Mon Sep 17 00:00:00 2001
 From: "song.yu" <song.yu@sophgo.com>
 Date: Wed, 24 Dec 2025 15:42:32 +0800
-Subject: [PATCH] feat: add panel LY030BXMS, ic:7701s
+Subject: [PATCH 78/84] feat: add panel LY030BXMS, ic:7701s
 
 Change-Id: I189167289f6f72ed103aa1aa9dee69cec0735d92
 ---
@@ -11,7 +11,7 @@ Change-Id: I189167289f6f72ed103aa1aa9dee69cec0735d92
  3 files changed, 401 insertions(+), 111 deletions(-)
 
 diff --git a/interdrv/vo/driver/vo_sdk_layer.c b/interdrv/vo/driver/vo_sdk_layer.c
-index f015749..e044e11 100644
+index 1f7c784b..2147e09c 100644
 --- a/interdrv/vo/driver/vo_sdk_layer.c
 +++ b/interdrv/vo/driver/vo_sdk_layer.c
 @@ -171,114 +171,398 @@ struct vo_fmt vo_sdk_formats[] = {
@@ -522,7 +522,7 @@ index f015749..e044e11 100644
  
  const struct disp_pattern patterns[VO_PAT_MAX] = {
 diff --git a/interdrv/vo/platform/alios/proc/vo_proc.c b/interdrv/vo/platform/alios/proc/vo_proc.c
-index e6b7306..7ed05b9 100644
+index e6b73064..7ed05b95 100644
 --- a/interdrv/vo/platform/alios/proc/vo_proc.c
 +++ b/interdrv/vo/platform/alios/proc/vo_proc.c
 @@ -124,7 +124,10 @@ static void intf_sync_to_string(vo_intf_sync_e intf_sync, char *str, int len)
@@ -545,7 +545,7 @@ index e6b7306..7ed05b9 100644
 \ No newline at end of file
 +#endif
 diff --git a/interdrv/vo/platform/linux/proc/vo_proc.c b/interdrv/vo/platform/linux/proc/vo_proc.c
-index 50b9720..b559295 100644
+index 50b97201..b5592956 100644
 --- a/interdrv/vo/platform/linux/proc/vo_proc.c
 +++ b/interdrv/vo/platform/linux/proc/vo_proc.c
 @@ -121,7 +121,10 @@ static void intf_sync_to_string(vo_intf_sync_e intf_sync, char *str, int len)
@@ -561,5 +561,5 @@ index 50b9720..b559295 100644
  		strncpy(str, "1440P@60", len);
  		break;
 -- 
-2.34.1
+2.25.1
 

@@ -1,0 +1,320 @@
+From ae38c04165677b8c171f296a793e075d557163f2 Mon Sep 17 00:00:00 2001
+From: "mark.wang" <mark.wang@sophgo.com>
+Date: Fri, 20 Mar 2026 14:36:32 +0800
+Subject: [PATCH 61/84] [feat](venc) support vbr [description ]: [root cause 
+ ]: NA [jira id     ]: NA [chip project]: cv184x [side effects]: NA
+ [Affected]: cv184x_vc_drv.ko
+
+Change-Id: I0c9999dd17103f58a19abc12d46e8429269152a5
+---
+ .../driver/enc_api/src/base/vc_enc_cmd.h      |   2 +
+ interdrv/vc_drv/driver/enc_api/src/enc.c      |   2 +-
+ interdrv/vc_drv/driver/enc_api/src/enc_impl.c |   1 +
+ .../driver/enc_api/src/rc/cvi_rc_model.c      | 151 +++++++++++++++++-
+ .../driver/enc_api/src/rc/cvi_rc_model.h      |   8 +
+ .../vc_drv/driver/enc_api/src/rc/vc_rc_cfg.h  |  15 ++
+ 6 files changed, 176 insertions(+), 3 deletions(-)
+
+diff --git a/interdrv/vc_drv/driver/enc_api/src/base/vc_enc_cmd.h b/interdrv/vc_drv/driver/enc_api/src/base/vc_enc_cmd.h
+index f1e16148..5d990efd 100644
+--- a/interdrv/vc_drv/driver/enc_api/src/base/vc_enc_cmd.h
++++ b/interdrv/vc_drv/driver/enc_api/src/base/vc_enc_cmd.h
+@@ -142,6 +142,8 @@ struct vc_enc_rc_cfg_s {
+ 	struct smart_rc_param_s smart_rc_cfg;
+ 	struct debreatheffect_s debreath_effect;
+ 
++	int initial_delay;
++
+ 	int max_re_encode_times;
+ 	int stat_time;
+ 	struct jpeg_enc_info_s *enc_info;
+diff --git a/interdrv/vc_drv/driver/enc_api/src/enc.c b/interdrv/vc_drv/driver/enc_api/src/enc.c
+index 188e31a0..06b1beda 100644
+--- a/interdrv/vc_drv/driver/enc_api/src/enc.c
++++ b/interdrv/vc_drv/driver/enc_api/src/enc.c
+@@ -343,7 +343,7 @@ static int venc_set_rc(struct vc_enc_inst_s *enc_inst, void *arg)
+ 
+ 	rc->row_qp_delta = rc_param->u32_row_qp_delta;
+ 	rc->first_frmstart_qp = rc_param->first_frm_start_qp;
+-	//pRc->initial_delay = prcp->s32_initial_delay;
++	rc->initial_delay = rc_param->s32_initial_delay;
+ 	//pRc->u32_thrd_lv = prcp->u32_thrd_lv;
+ 	enc_dbg_cfg("first_frm_start_qp = %d\n", rc->first_frmstart_qp);
+ 
+diff --git a/interdrv/vc_drv/driver/enc_api/src/enc_impl.c b/interdrv/vc_drv/driver/enc_api/src/enc_impl.c
+index 2e2bc3ee..ea112237 100644
+--- a/interdrv/vc_drv/driver/enc_api/src/enc_impl.c
++++ b/interdrv/vc_drv/driver/enc_api/src/enc_impl.c
+@@ -390,6 +390,7 @@ static void set_rc_cfg(struct rc_cfg_s *cfg, struct vc_enc_set_cfg_s *cfg_set)
+ 	cfg->avbr_frm_lost_open = rc->avbr_frm_lost_open;
+ 	cfg->avbr_frm_gap       = rc->avbr_frm_gap;
+ 	cfg->avbr_pure_still_thr = rc->avbr_pure_still_thr;
++	cfg->initial_delay       = rc->initial_delay;
+ 	cfg->max_qs = rc->max_qfactor;
+ 	cfg->min_qs = rc->min_qfactor;
+ 	if (rc->change & VC_ENC_RC_CFG_CHANGE_DROP_FRM)
+diff --git a/interdrv/vc_drv/driver/enc_api/src/rc/cvi_rc_model.c b/interdrv/vc_drv/driver/enc_api/src/rc/cvi_rc_model.c
+index 4ee4b4e4..10099d77 100644
+--- a/interdrv/vc_drv/driver/enc_api/src/rc/cvi_rc_model.c
++++ b/interdrv/vc_drv/driver/enc_api/src/rc/cvi_rc_model.c
+@@ -84,6 +84,82 @@ static unsigned int qp_to_lambda(unsigned int qp)
+ 	return FLOAT_EXP((FLOAT_DIV(FLOAT_SUB(qp, FLOAT_VAL_13p7122), FLOAT_VAL_4p2005)));
+ }
+ 
++
++static void rc_vbr_adjust_qp(struct rc_model_ctx_s *p, struct rc_kernel_pic_out_s *pic_out)
++{
++	int instant_delta = 0;
++
++	if (p->vbr_rc_gop_size <= 0) {
++		// should not happen, but just in case, skip VBR adjustment if no valid GOP size is set
++		return;
++	}
++
++	/*
++	 * Layer 1: rc_gop boundary — evaluate completed window for trend learning.
++	 * This only runs once per rc_gop_size frames.
++	 */
++	if (p->vbr_rc_gop_frame_cnt >= p->vbr_rc_gop_size) {
++		/* Default to neutral (at threshold): no action when bits are zero */
++		int ratio_vs_max    = VBR_UPPER_RATIO_THR;
++		int ratio_vs_target = VBR_LOWER_RATIO_THR_HI;
++
++		if (p->vbr_rc_gop_max_bits > 0)
++			ratio_vs_max = (p->vbr_rc_gop_accum_bits * 100) /
++				        p->vbr_rc_gop_max_bits;
++		if (p->vbr_rc_gop_target_bits > 0)
++			ratio_vs_target = (p->vbr_rc_gop_accum_bits * 100) /
++				           p->vbr_rc_gop_target_bits;
++
++		rc_dbg_avbr("[VBR-BND] accum=%d max=%d target=%d vs_max=%d%% vs_tgt=%d%%\n",
++			   p->vbr_rc_gop_accum_bits, p->vbr_rc_gop_max_bits,
++			   p->vbr_rc_gop_target_bits, ratio_vs_max, ratio_vs_target);
++
++		if (ratio_vs_max > VBR_UPPER_RATIO_THR)
++			p->vbr_qp_accum += MAX(VBR_QP_ACCUM_STEP_HARD * 1000 / p->vbr_sensitivity, 1);
++		else if (ratio_vs_target > VBR_LOWER_RATIO_THR_HI)
++			p->vbr_qp_accum += MAX(VBR_QP_ACCUM_STEP_SOFT * 1000 / p->vbr_sensitivity, 1);
++		else if (ratio_vs_target < VBR_LOWER_RATIO_THR_LO)
++			p->vbr_qp_accum -= MAX(VBR_QP_ACCUM_STEP_SOFT * 1000 / p->vbr_sensitivity, 1);
++		else if (p->vbr_qp_accum > 0)
++			p->vbr_qp_accum--;
++		else if (p->vbr_qp_accum < 0)
++			p->vbr_qp_accum++;
++
++		p->vbr_qp_accum = CLIP3(VBR_QP_ACCUM_MIN, VBR_QP_ACCUM_MAX, p->vbr_qp_accum);
++
++		p->vbr_rc_gop_accum_bits = 0;
++		p->vbr_rc_gop_frame_cnt = 0;
++	}
++
++	/*
++	 * Layer 2: Per-frame proportional ceiling check.
++	 * Compare accumulated bits so far against the proportional share of
++	 * the rc_gop budget (frame_cnt / rc_gop_size * total).
++	 * This detects overrun as it develops and applies an instant QP boost.
++	 * instant_delta is NOT accumulated — it's freshly computed each frame
++	 * and automatically disappears when bitrate comes back under control.
++	 */
++	if (p->vbr_rc_gop_frame_cnt >= VBR_LAYER2_MIN_FRAMES && p->vbr_rc_gop_size > 0) {
++		int prop_budget_max    = (p->vbr_rc_gop_max_bits / p->vbr_rc_gop_size) *
++					  p->vbr_rc_gop_frame_cnt;
++		int prop_budget_target = (p->vbr_rc_gop_target_bits / p->vbr_rc_gop_size) *
++					  p->vbr_rc_gop_frame_cnt;
++
++		if (p->vbr_rc_gop_accum_bits > prop_budget_max)
++			instant_delta = VBR_INSTANT_DELTA_HIGH;
++		else if (p->vbr_rc_gop_accum_bits > prop_budget_target)
++			instant_delta = VBR_INSTANT_DELTA_LOW;
++	}
++
++	/* Apply: persistent trend + instant correction */
++	if (p->vbr_qp_accum + instant_delta != 0) {
++		rc_dbg_avbr("[VBR-QP] qp=%d accum=%d inst=%d -> %d\n",
++			   pic_out->qp, p->vbr_qp_accum, instant_delta,
++			   pic_out->qp + p->vbr_qp_accum + instant_delta);
++		pic_out->qp += p->vbr_qp_accum + instant_delta;
++	}
++}
++
+ static void rc_set_bitrate_param(void *ctx)
+ {
+ 	struct rc_model_ctx_s *p = (struct rc_model_ctx_s *)ctx;
+@@ -92,7 +168,6 @@ static void rc_set_bitrate_param(void *ctx)
+ 	struct rc_kernel_info_s *p_rc_ker_info = &p->rc_kernel_info;
+ 	int frame_rate_div, frame_rate_res;
+ 
+-	// VBR
+ 	if (p_rc_cfg->rc_mode == RC_MODE_VBR) {
+ 		p_rc_ker_cfg->target_bitrate =
+ 			(p_rc_cfg->bitrate * p_rc_cfg->change_pos) / 100;
+@@ -296,6 +371,7 @@ int rc_avbr_get_qp_delta(void *ctx)
+ enum vc_ret_e rc_model_init(void *ctx, struct rc_cfg_s *cfg)
+ {
+ 	struct rc_model_ctx_s *p = (struct rc_model_ctx_s *)ctx;
++	int is_first_init = !p->rc_kernel_init;
+ 	int div, res;
+ 	int bit_rate_chg = 0;
+ 
+@@ -333,7 +409,8 @@ enum vc_ret_e rc_model_init(void *ctx, struct rc_cfg_s *cfg)
+ 
+ 	}
+ 	if (p->cfg.frame_rate != cfg->frame_rate ||
+-		p->cfg.bitrate != cfg->bitrate) {
++		p->cfg.bitrate != cfg->bitrate ||
++		p->cfg.change_pos != cfg->change_pos) {
+ 		bit_rate_chg = 1;
+ 	}
+ 
+@@ -365,6 +442,42 @@ enum vc_ret_e rc_model_init(void *ctx, struct rc_cfg_s *cfg)
+ 		p->period_motion_lv = AVBR_MOT_LV_DEFAULT;
+ 		p->last_period_motion_lv = AVBR_MOT_LV_DEFAULT;
+ 	}
++
++	if (p->cfg.rc_mode == RC_MODE_VBR) {
++		int vbr_param_chg = is_first_init || bit_rate_chg;
++
++		if (is_first_init) {
++			int base_rc_gop_size = MAX(cfg->gop / VBR_RC_GOP_ITER_NUM, 1);
++			int size;
++
++			p->vbr_rc_gop_size = 1;
++			for (size = base_rc_gop_size; size <= cfg->gop; size++) {
++				if (cfg->gop % size == 0) {
++					p->vbr_rc_gop_size = size;
++					break;
++				}
++			}
++
++			p->vbr_rc_gop_accum_bits = 0;
++			p->vbr_rc_gop_frame_cnt = 0;
++			p->vbr_qp_accum = 0;
++		}
++
++		p->vbr_sensitivity = MAX(cfg->initial_delay, 1);
++
++		if (vbr_param_chg && p->frame_rate > 0) {
++			int chg_bitrate = (cfg->bitrate * cfg->change_pos) / 100;
++
++			p->vbr_rc_gop_target_bits = (chg_bitrate * 1000 / p->frame_rate) *
++						     p->vbr_rc_gop_size;
++			p->vbr_rc_gop_max_bits = (cfg->bitrate * 1000 / p->frame_rate) *
++						  p->vbr_rc_gop_size;
++		}
++
++		rc_dbg_avbr("[VBR-INIT] first=%d gop=%d rc_gop=%d target=%d max=%d\n",
++			   is_first_init, cfg->gop, p->vbr_rc_gop_size,
++			   p->vbr_rc_gop_target_bits, p->vbr_rc_gop_max_bits);
++	}
+ 	return VC_OK;
+ }
+ 
+@@ -819,6 +932,10 @@ enum vc_ret_e rc_model_start(void *ctx, struct enc_rc_task_s *task)
+ 		rc_kernel_estimate_pic(&p->rc_kernel_info, pic_out,
+ 				task->status.slice_type == I_SLICE, task->info.frm_idx);
+ 
++		// VBR: apply direct QP delta after kernel estimation
++		if (p->cfg.rc_mode == RC_MODE_VBR)
++			rc_vbr_adjust_qp(p, pic_out);
++
+ 		if (p->cfg.hierarchical_qp.hiercal_qp_en) {
+ 			rc_hier_calc_dealt_qp(p, task->status.slice_type);
+ 			if (p->qp_temporal_id) {
+@@ -904,6 +1021,28 @@ enum vc_ret_e rc_model_end(void *ctx, struct enc_rc_task_s *task)
+ 	p->last_mv_window[task->info.frm_idx % DBT_WIN_SIZE] = task->info.pic_motion_level;
+ 	p->bps_buffer = VC_MAX(p->bps_buffer + pic_in->encoded_bit - rc_ker_info->pic_avg_bit, 0);
+ 
++	/* VBR: update rc_gop and GOP bitrate tracking */
++	if (p->cfg.rc_mode == RC_MODE_VBR) {
++		int encoded_bits = task->info.bit_real;
++		int accum_bits = encoded_bits;
++
++		if (task->status.is_intra) {
++			int i_target = p->pic_out.target_bit;
++			int i_excess = encoded_bits - i_target;
++
++			if (i_excess > 0)
++				accum_bits = i_target;
++		}
++
++		/* Update rc_gop stats (short-term — drives QP adjustment) */
++		p->vbr_rc_gop_accum_bits += accum_bits;
++		p->vbr_rc_gop_frame_cnt++;
++
++		rc_dbg_avbr("[VBR-END] bits=%d accum(abs)=%d rc_gop=%d/%d qp_accum=%d\n",
++			   encoded_bits, accum_bits, p->vbr_rc_gop_frame_cnt,
++			   p->vbr_rc_gop_size, p->vbr_qp_accum);
++	}
++
+ 	return VC_OK;
+ 
+ }
+@@ -928,5 +1067,13 @@ void rc_model_proc_show(void *seq_file, void *ctx,
+ 		p_rc_ker_cfg->min_iqp, p_rc_ker_cfg->max_iqp,
+ 		p_rc_ker_cfg->min_qp, p_rc_ker_cfg->max_qp,
+ 		p->pic_out.qp);
++
++	if (rc_info->rc_mode == RC_MODE_VBR) {
++		vc_seq_printf(seq_file,
++			"VBR: rc_gop=%d/%d accum=%d target=%d max=%d qp_accum=%d sensitivity=%d\n",
++			p->vbr_rc_gop_frame_cnt, p->vbr_rc_gop_size,
++			p->vbr_rc_gop_accum_bits, p->vbr_rc_gop_target_bits,
++			p->vbr_rc_gop_max_bits, p->vbr_qp_accum, p->vbr_sensitivity);
++	}
+ }
+ 
+diff --git a/interdrv/vc_drv/driver/enc_api/src/rc/cvi_rc_model.h b/interdrv/vc_drv/driver/enc_api/src/rc/cvi_rc_model.h
+index 2abaa623..0f4de3d7 100644
+--- a/interdrv/vc_drv/driver/enc_api/src/rc/cvi_rc_model.h
++++ b/interdrv/vc_drv/driver/enc_api/src/rc/cvi_rc_model.h
+@@ -80,6 +80,14 @@ struct rc_model_ctx_s {
+ 	int frame_rate;
+ 	int pbits_used;
+ 
++	int vbr_rc_gop_size;		/* rc_gop window size (fixed divisor of GOP) */
++	int vbr_rc_gop_target_bits;	/* rc_gop target bits (change_pos scaled) */
++	int vbr_rc_gop_max_bits;	/* rc_gop max bits (hard max_bitrate ceiling) */
++	int vbr_rc_gop_accum_bits;	/* accumulated bits in current rc_gop window */
++	int vbr_rc_gop_frame_cnt;	/* frame count in current rc_gop window */
++	int vbr_qp_accum;		/* Range [VBR_QP_ACCUM_MIN, VBR_QP_ACCUM_MAX]; QP smoothing accumulator */
++	int vbr_sensitivity;		/* Layer 1 step scaling factor (from initial_delay, default 1000) */
++
+ 	unsigned int rc_kernel_init;
+ };
+ 
+diff --git a/interdrv/vc_drv/driver/enc_api/src/rc/vc_rc_cfg.h b/interdrv/vc_drv/driver/enc_api/src/rc/vc_rc_cfg.h
+index 3c0d90f2..ccc94f9d 100644
+--- a/interdrv/vc_drv/driver/enc_api/src/rc/vc_rc_cfg.h
++++ b/interdrv/vc_drv/driver/enc_api/src/rc/vc_rc_cfg.h
+@@ -16,6 +16,19 @@
+ #define AVBR_MOT_LV_DEFAULT 			(32)
+ #define AVBR_MOT_LOWER_THR 				(64)
+ 
++/* VBR QP adjustment parameters */
++#define VBR_RC_GOP_ITER_NUM		(6)    /* rc_gop subdivision count per GOP, must match rc_kernel */
++#define VBR_QP_ACCUM_MIN		(-2)   /* lower bound of persistent QP delta (quality boost limit) */
++#define VBR_QP_ACCUM_MAX		(8)    /* upper bound of persistent QP delta (bitrate cap limit) */
++#define VBR_QP_ACCUM_STEP_HARD		(2)    /* Layer 1 accumulator step: hard ceiling exceeded */
++#define VBR_QP_ACCUM_STEP_SOFT		(1)    /* Layer 1 accumulator step: target-based adjustment */
++#define VBR_UPPER_RATIO_THR			(100)  /* accum/max_bits %: above → hard suppression */
++#define VBR_LOWER_RATIO_THR_HI		(100)  /* accum/target_bits %: above → soft suppression */
++#define VBR_LOWER_RATIO_THR_LO		(90)   /* accum/target_bits %: below → quality boost */
++#define VBR_INSTANT_DELTA_HIGH		(2)    /* instant QP boost when proportional max budget exceeded */
++#define VBR_INSTANT_DELTA_LOW		(1)    /* instant QP boost when proportional target budget exceeded */
++#define VBR_LAYER2_MIN_FRAMES		(2)    /* min frames in rc_gop before Layer 2 activates */
++
+ struct vc_rc_impl_s;
+ struct rc_cfg_s {
+ 	/* encode image size */
+@@ -67,6 +80,8 @@ struct rc_cfg_s {
+ 	struct debreatheffect_s debreath_effect;
+ 	unsigned int svc_enable;
+ 
++	int initial_delay;
++
+ 	int max_re_encode_times;
+ 	int stat_time;
+ 	struct jpeg_enc_info_s *enc_info;
+-- 
+2.25.1
+

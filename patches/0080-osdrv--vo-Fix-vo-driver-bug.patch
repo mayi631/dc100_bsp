@@ -1,7 +1,7 @@
-From 301c4ec23112349d663921dba33819d3eb012984 Mon Sep 17 00:00:00 2001
+From c15050a7cd0f1d42c84036c58f7493473ef0ff18 Mon Sep 17 00:00:00 2001
 From: "qiliang.zhou" <qiliang.zhou@sophgo.com>
 Date: Mon, 15 Jun 2026 15:34:29 +0800
-Subject: [PATCH] [fix](vo):Fix vo driver bug
+Subject: [PATCH 80/84] (vo):Fix vo driver bug
 
 [description]:NA
 [root cause]:NA
@@ -17,7 +17,7 @@ Change-Id: Ic79dba66e688990837d99299f443d742456318bc
  2 files changed, 5 insertions(+)
 
 diff --git a/interdrv/vo/driver/vo_process.c b/interdrv/vo/driver/vo_process.c
-index 7c05bbee..49e03c50 100644
+index 7cc7a4c4..f72d7b6a 100644
 --- a/interdrv/vo/driver/vo_process.c
 +++ b/interdrv/vo/driver/vo_process.c
 @@ -414,6 +414,7 @@ static int layer_process(struct vo_layer_ctx *layer_ctx)
@@ -37,7 +37,7 @@ index 7c05bbee..49e03c50 100644
  	disp_buf->buf.length = 3;
  
 diff --git a/interdrv/vo/driver/vo_sdk_layer.c b/interdrv/vo/driver/vo_sdk_layer.c
-index 2e45d529..f8ce5d9b 100644
+index 2147e09c..f1502bcc 100644
 --- a/interdrv/vo/driver/vo_sdk_layer.c
 +++ b/interdrv/vo/driver/vo_sdk_layer.c
 @@ -749,6 +749,9 @@ static void release_buffer(struct vo_layer_ctx *layer_ctx, struct osal_list_head

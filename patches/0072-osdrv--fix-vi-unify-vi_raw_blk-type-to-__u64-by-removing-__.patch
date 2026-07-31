@@ -1,0 +1,37 @@
+From e27894c2bb95e54b68cc7c3c72443abcc1c07309 Mon Sep 17 00:00:00 2001
+From: "xingyu.shen" <xingyu.shen@sophgo.com>
+Date: Thu, 4 Jun 2026 16:58:26 +0800
+Subject: [PATCH 72/84] [fix](vi): unify vi_raw_blk type to __u64 by removing
+ __arm__ conditional
+
+[description ]: NA
+[root cause  ]: NA
+[jira id     ]: CV184XSDK-1249
+[chip project]: cv184x
+[side effects]: NA
+[Affected]: NA
+
+Change-Id: I043e8bdf9e791a50cd813e66e15b6d003caca242
+---
+ interdrv/include/common/kapi/vi_ctx.h | 4 ----
+ 1 file changed, 4 deletions(-)
+
+diff --git a/interdrv/include/common/kapi/vi_ctx.h b/interdrv/include/common/kapi/vi_ctx.h
+index 968a3672..d2cfcb80 100644
+--- a/interdrv/include/common/kapi/vi_ctx.h
++++ b/interdrv/include/common/kapi/vi_ctx.h
+@@ -49,11 +49,7 @@ struct vi_ctx {
+ 
+ 	__u32 blk_size[VI_MAX_PIPE_NUM][VI_MAX_CHN_NUM];
+ 	__u8 bypass_frm[VI_MAX_PIPE_NUM];
+-#ifdef __arm__
+-	__u32 vi_raw_blk[2];
+-#else
+ 	__u64 vi_raw_blk[2];
+-#endif
+ 	__s32 chn_bind[VI_MAX_CHN_NUM][VI_MAX_EXTCHN_BIND_PER_CHN];
+ 	vi_ext_chn_attr_s ext_chn_attr[VI_MAX_EXT_CHN_NUM];
+ };
+-- 
+2.25.1
+

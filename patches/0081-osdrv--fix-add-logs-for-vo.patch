@@ -1,7 +1,7 @@
-From 20aa7f632568be08ce13b1aa76a506a253de77c4 Mon Sep 17 00:00:00 2001
+From 84386faac800d0827daf4d1127204558a8d32ee5 Mon Sep 17 00:00:00 2001
 From: "xiu.yang" <xiu.yang@sophgo.com>
 Date: Fri, 24 Jul 2026 08:26:15 +0800
-Subject: [PATCH] fix:add logs for vo
+Subject: [PATCH 81/84] fix:add logs for vo
 
 Change-Id: I3def4571eeb3ab751db7518943e3df27f9a3aa88
 ---
@@ -9,7 +9,7 @@ Change-Id: I3def4571eeb3ab751db7518943e3df27f9a3aa88
  1 file changed, 101 insertions(+), 87 deletions(-)
 
 diff --git a/interdrv/vo/driver/vo_process.c b/interdrv/vo/driver/vo_process.c
-index 49e03c50..58f362d1 100644
+index f72d7b6a..0009aa96 100644
 --- a/interdrv/vo/driver/vo_process.c
 +++ b/interdrv/vo/driver/vo_process.c
 @@ -702,47 +702,59 @@ int vo_recv_frame(mmf_chn_s chn, vb_blk blk, void *data)

@@ -1,0 +1,259 @@
+From 8729f089516290adcd984471516594814b95a34c Mon Sep 17 00:00:00 2001
+From: "weiyong.luo" <weiyong.luo@sophgo.com>
+Date: Thu, 4 Jun 2026 11:04:30 +0800
+Subject: [PATCH 74/84] [bug]: rgn canvas buffer sync design
+
+[description ]: NA
+[root cause  ]: NA
+[jira id     ]: CV184XSDK-1299
+[chip project]: cv184x
+[side effects]: NA
+[Affected]: NA
+
+Change-Id: I3859fd1cd533142ef07296b73eab502ef8e04ef7
+(cherry picked from commit f10bb3363559a2d599a5b9299c11c92cb02be8a8)
+---
+ interdrv/include/common/kapi/rgn_cb.h  |  8 +++
+ interdrv/include/common/kapi/vpss_cb.h |  1 +
+ interdrv/rgn/driver/rgn.c              | 45 ++++++++--------
+ interdrv/vpss/driver/vpss_core.c       | 25 +++++++++
+ interdrv/vpss/driver/vpss_rgn_ctrl.c   | 75 ++++++++++++++++++++++++++
+ interdrv/vpss/driver/vpss_rgn_ctrl.h   |  2 +
+ 6 files changed, 135 insertions(+), 21 deletions(-)
+
+diff --git a/interdrv/include/common/kapi/rgn_cb.h b/interdrv/include/common/kapi/rgn_cb.h
+index 6a93279f..416bf74e 100644
+--- a/interdrv/include/common/kapi/rgn_cb.h
++++ b/interdrv/include/common/kapi/rgn_cb.h
+@@ -65,6 +65,14 @@ struct _rgn_clr_ow_addr_cb_param {
+ 	__u8 ow_inst;
+ };
+ 
++struct _rgn_is_addr_in_use_cb_param {
++	mmf_chn_s chn;
++	rgn_handle handle;
++	__u32 layer;
++	__u64 addr;     // [in] physical address to check
++	__u8 in_use;    // [out] whether the address is currently in use
++};
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/interdrv/include/common/kapi/vpss_cb.h b/interdrv/include/common/kapi/vpss_cb.h
+index f268717e..d979cb94 100644
+--- a/interdrv/include/common/kapi/vpss_cb.h
++++ b/interdrv/include/common/kapi/vpss_cb.h
+@@ -128,6 +128,7 @@ enum vpss_cb_cmd {
+ 	VPSS_CB_GDC_GET_CHN_ATTR,
+ 	VPSS_CB_GDC_SET_CHN_CFG,
+ 	VPSS_CB_SBM_FRM_DONE,
++	VPSS_CB_IS_RGN_ADDR_IN_USE,
+ 	VPSS_CB_MAX
+ };
+ 
+diff --git a/interdrv/rgn/driver/rgn.c b/interdrv/rgn/driver/rgn.c
+index f48262f7..cde45818 100644
+--- a/interdrv/rgn/driver/rgn.c
++++ b/interdrv/rgn/driver/rgn.c
+@@ -1814,8 +1814,7 @@ int rgn_get_canvas_info(rgn_handle handle, rgn_canvas_info_s *pcanvas_info)
+ 	struct rgn_ctx *ctx = NULL;
+ 	unsigned int proc_idx;
+ 	unsigned int canvas_num;
+-	int ret;
+-	struct _rgn_get_ow_addr_cb_param cb_param;
++	int ret = 0;
+ 	int cnt = 0;
+ 
+ 	ret = check_rgn_handle(&ctx, handle);
+@@ -1848,33 +1847,37 @@ int rgn_get_canvas_info(rgn_handle handle, rgn_canvas_info_s *pcanvas_info)
+ 		, handle, pcanvas_info->pixel_format, pcanvas_info->size.width
+ 		, pcanvas_info->size.height, pcanvas_info->stride, pcanvas_info->compressed);
+ 
+-	if ((canvas_num > 1) && (pcanvas_info->compressed)) {
+-		TRACE_RGN(RGN_INFO, "canvas p_addr(%llx) v_addr(%lx).\n"
+-			, pcanvas_info->phy_addr, (uintptr_t)pcanvas_info->virt_addr);
++	if ((canvas_num > 1) && (ctx->chn.mod_id == ID_VPSS)) {
++		struct _rgn_is_addr_in_use_cb_param in_use_param;
++		u32 osd_layer = pcanvas_info->compressed ? RGN_ODEC_LAYER_VPSS : RGN_NORMAL_LAYER_VPSS;
+ 
+-		cb_param.chn = ctx->chn;
+-		cb_param.handle = handle;
+-		cb_param.layer = RGN_ODEC_LAYER_VPSS;
++		in_use_param.chn = ctx->chn;
++		in_use_param.handle = handle;
++		in_use_param.layer = osd_layer;
++		in_use_param.addr = pcanvas_info->phy_addr;
+ 
+ 		do {
+-			if (_rgn_call_cb(E_MODULE_VPSS, VPSS_CB_GET_RGN_OW_ADDR, &cb_param) != 0) {
+-				TRACE_RGN(RGN_ERR, "VPSS_CB_GET_RGN_OW_ADDR is failed\n");
+-					return ERR_RGN_ILLEGAL_PARAM;
++			in_use_param.in_use = 0;
++			if (_rgn_call_cb(E_MODULE_VPSS, VPSS_CB_IS_RGN_ADDR_IN_USE, &in_use_param) != 0) {
++				TRACE_RGN(RGN_ERR, "VPSS_CB_IS_RGN_ADDR_IN_USE is failed\n");
++				return ERR_RGN_ILLEGAL_PARAM;
+ 			}
+ 			cnt++;
+-			osal_mdelay(1);
+-		} while ((cb_param.addr == pcanvas_info->phy_addr) && (cnt <= 500) && ctx->chn_attr.show);
++			osal_msleep(4);
++		} while (in_use_param.in_use && (cnt <= 100) && ctx->chn_attr.show);
++	}
+ 
+-		TRACE_RGN(RGN_INFO, "VPSS_CB_GET_RGN_OW_ADDR PhyAaddr:%llx cnt:%d.\n",
+-			cb_param.addr, cnt);
+-		TRACE_RGN(RGN_INFO, "ow addr(%llx).\n", cb_param.addr);
+-		if (cb_param.addr == pcanvas_info->phy_addr) {
+-			TRACE_RGN(RGN_INFO, "get a using canvas!\n");
+-		}
++	if (cnt > 100) {
++		TRACE_RGN(RGN_ERR, "rgn_handle(%d) wait canvas[%d] hw_ref timeout.\n",
++			handle, ctx->canvas_idx);
++		ret = ERR_RGN_BUSY;
++		ctx->canvas_get = 0;
++	} else {
++		ctx->canvas_get = 1;
++		ret = 0;
+ 	}
+-	ctx->canvas_get = 1;
+ 
+-	return 0;
++	return ret;
+ }
+ 
+ int rgn_update_canvas(rgn_handle handle)
+diff --git a/interdrv/vpss/driver/vpss_core.c b/interdrv/vpss/driver/vpss_core.c
+index 7ed6b065..0791ef77 100644
+--- a/interdrv/vpss/driver/vpss_core.c
++++ b/interdrv/vpss/driver/vpss_core.c
+@@ -400,6 +400,31 @@ static int _vpss_core_cb(void *dev, cb_modules_id caller, u32 cmd, void *arg)
+ 		break;
+ 	}
+ 
++
++	case VPSS_CB_IS_RGN_ADDR_IN_USE:
++	{
++		struct _rgn_is_addr_in_use_cb_param *attr = (struct _rgn_is_addr_in_use_cb_param *)arg;
++		vpss_grp vpss_grp = attr->chn.dev_id;
++		vpss_chn vpss_chn = attr->chn.chn_id;
++		u32 layer = attr->layer;
++		int idx_ret = _vpss_get_dev_idx(vpss_grp, vpss_chn, cores);
++		u8 dev_idx;
++
++		if (idx_ret < 0) {
++			TRACE_VPSS(DBG_ERR, "_vpss_get_dev_idx failed(%d)\n", idx_ret);
++			rc = idx_ret;
++			break;
++		}
++		dev_idx = (u8)idx_ret;
++
++		if (dev_idx > 1)
++			layer = 0;
++
++		rc = vpss_is_rgn_addr_in_use(vpss_grp, vpss_chn, layer, attr->handle,
++				attr->addr, &attr->in_use, &cores->ctx, dev_idx);
++		break;
++	}
++
+ 	case VPSS_CB_GET_CHN_SIZE:
+ 	{
+ 		struct _rgn_chn_size_cb_param *attr = (struct _rgn_chn_size_cb_param *)arg;
+diff --git a/interdrv/vpss/driver/vpss_rgn_ctrl.c b/interdrv/vpss/driver/vpss_rgn_ctrl.c
+index 4046861b..649ec1fe 100644
+--- a/interdrv/vpss/driver/vpss_rgn_ctrl.c
++++ b/interdrv/vpss/driver/vpss_rgn_ctrl.c
+@@ -307,3 +307,78 @@ s32 vpss_set_rgn_lut_cfg(vpss_grp grp_id, vpss_chn chn_id,
+ 	return 0;
+ }
+ 
++s32 vpss_is_rgn_addr_in_use(vpss_grp grp_id, vpss_chn chn_id, u32 layer,
++		rgn_handle handle, u64 addr, u8 *in_use, struct vpss_ctx *ctx, u8 dev_idx)
++{
++	s32 ret, i, j;
++	u8 ow_inst;
++	u64 hw_addr = 0;
++	struct vpss_grp_ctx *grp_ctx;
++	struct vpss_chn_ctx *chn_ctx;
++	struct vpss_hal_ctx *hal_ctx;
++	struct vpss_job *job_item;
++	unsigned long flags;
++
++	*in_use = 0;
++
++	ret = check_vpss_id(grp_id, chn_id, ctx);
++	if (ret != 0)
++		return ret;
++
++	if (layer >= RGN_MAX_LAYER_VPSS) {
++		TRACE_VPSS(DBG_ERR, "invalid layer(%d), vpss only has gop0 & gop1\n", layer);
++		return ERR_VPSS_ILLEGAL_PARAM;
++	}
++
++	grp_ctx = ctx->grp_ctx[grp_id];
++	chn_ctx = &grp_ctx->chn_ctxs[chn_id];
++	osal_mutex_lock(&grp_ctx->lock);
++
++	for (i = 0; i < RGN_MAX_NUM_VPSS; ++i) {
++		if (chn_ctx->rgn_handle[layer][i] == handle) {
++			ow_inst = i;
++			break;
++		}
++	}
++	if (i == RGN_MAX_NUM_VPSS) {
++		osal_mutex_unlock(&grp_ctx->lock);
++		return -1;
++	}
++
++	// check hardware register (current active job)
++	vpss_get_gop_addr(dev_idx, layer, ow_inst, &hw_addr);
++	if (hw_addr == addr) {
++		*in_use = 1;
++		osal_mutex_unlock(&grp_ctx->lock);
++		return 0;
++	}
++
++	if (chn_ctx->rgn_cfg[layer].param[chn_ctx->rgn_cfg[layer].odec.attached_ow].phy_addr == addr) {
++		*in_use = 1;
++		osal_mutex_unlock(&grp_ctx->lock);
++		return 0;
++	}
++
++	// check all jobs in job_online_queue
++	hal_ctx = (struct vpss_hal_ctx *)grp_ctx->hal_ctx_ptr;
++	if (hal_ctx) {
++		osal_spin_lock_irqsave(&hal_ctx->task_lock, &flags);
++		osal_list_for_each_entry(job_item, &hal_ctx->job_online_queue, list) {
++			if (job_item->grp_id != grp_id)
++				continue;
++			for (j = 0; j < RGN_MAX_NUM_VPSS; j++) {
++				if (job_item->cfg.chn_cfg[chn_id].rgn_cfg[layer].param[j].phy_addr == addr) {
++					*in_use = 1;
++					osal_spin_unlock_irqrestore(&hal_ctx->task_lock, &flags);
++					osal_mutex_unlock(&grp_ctx->lock);
++					return 0;
++				}
++			}
++		}
++		osal_spin_unlock_irqrestore(&hal_ctx->task_lock, &flags);
++	}
++
++	osal_mutex_unlock(&grp_ctx->lock);
++	return 0;
++}
++
+diff --git a/interdrv/vpss/driver/vpss_rgn_ctrl.h b/interdrv/vpss/driver/vpss_rgn_ctrl.h
+index bf60aa09..c98248ce 100644
+--- a/interdrv/vpss/driver/vpss_rgn_ctrl.h
++++ b/interdrv/vpss/driver/vpss_rgn_ctrl.h
+@@ -19,5 +19,7 @@ s32 vpss_get_rgn_ow_inst(vpss_grp grp_id, vpss_chn chn_id, u32 layer,
+ 		rgn_handle handle, struct vpss_ctx *ctx, u8 *ow_inst);
+ s32 vpss_set_rgn_lut_cfg(vpss_grp grp_id, vpss_chn chn_id,
+ 		struct rgn_lut_cfg *cfg, struct vpss_ctx *ctx);
++s32 vpss_is_rgn_addr_in_use(vpss_grp grp_id, vpss_chn chn_id, u32 layer,
++		rgn_handle handle, u64 addr, u8 *in_use, struct vpss_ctx *ctx, u8 dev_idx);
+ 
+ #endif /* _VPSS_RGN_CTRL_H_ */
+-- 
+2.25.1
+

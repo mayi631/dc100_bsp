@@ -1,0 +1,101 @@
+From 6c4dc2b539355711c0b3aa68a569c80fbacb4b31 Mon Sep 17 00:00:00 2001
+From: "yikai.zhang" <yikai.zhang@sophgo.com>
+Date: Tue, 23 Jun 2026 11:39:57 +0800
+Subject: [PATCH 75/84] [fix](rgn): Fix the bug that rgn clears the VGOP
+ address. [description]:NA [root cause]:NA [JIRA ID]:CV184XSDK-1326 [chip
+ project]:NA [side effects]:NA [Affected*.ko/*.so/*.a]:NA
+
+Change-Id: Ied07f628b7fec0b7f5526048797d0e19bc838572
+---
+ interdrv/include/common/kapi/rgn_ctx.h |  1 +
+ interdrv/rgn/driver/rgn.c              | 41 +++++++++++++++++---------
+ 2 files changed, 28 insertions(+), 14 deletions(-)
+
+diff --git a/interdrv/include/common/kapi/rgn_ctx.h b/interdrv/include/common/kapi/rgn_ctx.h
+index 102f36bf..5785bcc6 100644
+--- a/interdrv/include/common/kapi/rgn_ctx.h
++++ b/interdrv/include/common/kapi/rgn_ctx.h
+@@ -28,6 +28,7 @@ struct rgn_ctx {
+ 	unsigned char odec_data_valid;
+ 	unsigned char canvas_updated;
+ 	osal_mutex rgn_canvas_q_lock;
++	unsigned char ow_inst;
+ };
+ 
+ #ifdef __cplusplus
+diff --git a/interdrv/rgn/driver/rgn.c b/interdrv/rgn/driver/rgn.c
+index cde45818..67cea793 100644
+--- a/interdrv/rgn/driver/rgn.c
++++ b/interdrv/rgn/driver/rgn.c
+@@ -1497,6 +1497,7 @@ int rgn_attach_to_chn(rgn_handle handle, const mmf_chn_s *pchn, const rgn_chn_at
+ 	unsigned int proc_idx;
+ 	int ret;
+ 	unsigned char i;
++	struct _rgn_clr_ow_addr_cb_param cb_param;
+ 
+ 	ret = check_rgn_handle(&ctx, handle);
+ 	if (ret != 0)
+@@ -1658,6 +1659,23 @@ int rgn_attach_to_chn(rgn_handle handle, const mmf_chn_s *pchn, const rgn_chn_at
+ 		// only update rgn_prc_ctx after _rgn_update_hw success
+ 		rgn_prc_ctx[proc_idx].used = true;
+ 	}
++
++	cb_param.chn = ctx->chn;
++	cb_param.handle = handle;
++	if (ctx->canvas_info[ctx->canvas_idx].compressed) {
++		cb_param.layer = RGN_ODEC_LAYER_VPSS;
++	} else {
++		cb_param.layer = RGN_NORMAL_LAYER_VPSS;
++	}
++
++	if (ctx->region.type == OVERLAY_RGN || ctx->region.type == COVER_RGN) {
++		if (_rgn_call_cb(E_MODULE_VPSS, VPSS_CB_GET_RGN_OW_INST, &cb_param) != 0) {
++			TRACE_RGN(RGN_ERR, "VPSS_CB_GET_RGN_OW_INST is failed\n");
++		}
++	}
++
++	ctx->ow_inst = cb_param.ow_inst;
++
+ 	osal_mutex_unlock(&g_rgnlock);
+ 
+ 	return ret;
+@@ -1698,20 +1716,6 @@ int rgn_detach_from_chn(rgn_handle handle, const mmf_chn_s *pchn)
+ 
+ 	osal_mutex_lock(&g_rgnlock);
+ 
+-	cb_param.chn = ctx->chn;
+-	cb_param.handle = handle;
+-	if (ctx->canvas_info[ctx->canvas_idx].compressed) {
+-		cb_param.layer = RGN_ODEC_LAYER_VPSS;
+-	} else {
+-		cb_param.layer = RGN_NORMAL_LAYER_VPSS;
+-	}
+-
+-	if (ctx->region.type == OVERLAY_RGN || ctx->region.type == COVER_RGN) {
+-		if (_rgn_call_cb(E_MODULE_VPSS, VPSS_CB_GET_RGN_OW_INST, &cb_param) != 0) {
+-			TRACE_RGN(RGN_ERR, "VPSS_CB_GET_RGN_OW_INST is failed\n");
+-		}
+-	}
+-
+ 	ret = _rgn_update_hw(ctx, RGN_OP_REMOVE);
+ 	if (ret == 0) {
+ 		ctx->chn.mod_id = rgn_prc_ctx[proc_idx].chn.mod_id = ID_BASE;
+@@ -1735,6 +1739,15 @@ int rgn_detach_from_chn(rgn_handle handle, const mmf_chn_s *pchn)
+ 			base_ion_free(ctx->canvas_info[0].phy_addr);
+ 	}
+ 
++	cb_param.chn = ctx->chn;
++	cb_param.handle = handle;
++	if (ctx->canvas_info[ctx->canvas_idx].compressed) {
++		cb_param.layer = RGN_ODEC_LAYER_VPSS;
++	} else {
++		cb_param.layer = RGN_NORMAL_LAYER_VPSS;
++	}
++	cb_param.ow_inst = ctx->ow_inst;
++
+ 	if (ctx->region.type == OVERLAY_RGN || ctx->region.type == COVER_RGN) {
+ 		if (_rgn_call_cb(E_MODULE_VPSS, VPSS_CB_CLR_RGN_OW_ADDR, &cb_param) != 0) {
+ 			TRACE_RGN(RGN_ERR, "VPSS_CB_CLR_RGN_OW_ADDR is failed\n");
+-- 
+2.25.1
+

@@ -1,0 +1,40 @@
+From d09c9bd0cf2e954af7883da32f635b3b927c802a Mon Sep 17 00:00:00 2001
+From: "xingyu.shen" <xingyu.shen@sophgo.com>
+Date: Fri, 5 Jun 2026 15:51:01 +0800
+Subject: [PATCH 73/84] [fix](vi): fix the return value of vi_sdk_dqbuf
+
+[description ]: NA
+[root cause  ]: NA
+[jira id     ]: NA
+[chip project]: cv184x
+[side effects]: NA
+[Affected]: NA
+
+Change-Id: Ie18667d7b37230c34eab3903ad6b0f249f102092
+---
+ interdrv/vi/driver/vi_sdk_layer.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/interdrv/vi/driver/vi_sdk_layer.c b/interdrv/vi/driver/vi_sdk_layer.c
+index 1e6b0364..c233cb2c 100644
+--- a/interdrv/vi/driver/vi_sdk_layer.c
++++ b/interdrv/vi/driver/vi_sdk_layer.c
+@@ -201,13 +201,13 @@ vb_blk vi_sdk_dqbuf(mmf_chn_s mmf_chn, void *data)
+ 
+ 	if (!vdev) {
+ 		vi_pr(VI_ERR, "null point\n");
+-		return ERR_VI_INVALID_NULL_PTR;
++		return VB_INVALID_HANDLE;
+ 	}
+ 
+ 	ret = vb_dqbuf(mmf_chn, &vdev->vi_jobs[pipe][chn], &blk);
+ 	if (ret != 0) {
+ 		vi_pr(VI_DBG, "Can't acquire VB BLK for VI\n");
+-		return ERR_VI_NOMEM;
++		return VB_INVALID_HANDLE;
+ 	}
+ 
+ 	return blk;
+-- 
+2.25.1
+
