@@ -1,7 +1,7 @@
 {
     "bsp": {
         "xml": "../manifest/sdk-github-cv184x.xml",
-        "txt": "../manifest/git_version_github_cv184x_2026-03-24.txt"
+        "txt": "../manifest/git_version_github_cv184x_2026-06-30"
     },
     "app": {
         "xml": "../manifest/sophcam_app-github.xml",

@@ -1,0 +1,162 @@
+From 0c8d4a7c4c4c664b7ce024facd8eb0ac98706235 Mon Sep 17 00:00:00 2001
+From: "xiu.yang" <xiu.yang@sophgo.com>
+Date: Thu, 30 Jul 2026 20:39:41 +0800
+Subject: [PATCH] feat: add panel LY030BXMS, ic:7701s
+
+Change-Id: Iadapt-ly030bxms-panelsupportlist
+---
+ Kconfig.panels                                 |    5 +
+ cvi_panels.h                                   |    7 +
+ panels/dsi_ly030bxms_480x640_NULL_2lane_60fps.h |  107 ++++++++++++++++++++
+ 3 files changed
+
+Change-Id: I3d7cdea8270b6c2d0b51648742a48ec1a53a3212
+
+diff --git a/Kconfig.panels b/Kconfig.panels
+index c819fbb..757654e 100644
+--- a/Kconfig.panels
++++ b/Kconfig.panels
+@@ -84,6 +84,11 @@ config DSI_LT9611_MULTI_NULL_4LANE_60FPS
+     help
+       "y" Config dsi_lt9611_multi_NULL_4lane_60fps.
+ 
++config DSI_LY030BXMS_480X640_NULL_2LANE_60FPS
++    bool "dsi_ly030bxms_480x640_NULL_2lane_60fps"
++    help
++      "y" Config dsi_ly030bxms_480x640_NULL_2lane_60fps.
++
+ config DSI_NT35521_800X1280_NULL_4LANE_60FPS
+     bool "dsi_nt35521_800x1280_NULL_4lane_60fps"
+     help
+diff --git a/cvi_panels.h b/cvi_panels.h
+index bde5658..0dfc8a9 100644
+--- a/cvi_panels.h
++++ b/cvi_panels.h
+@@ -124,6 +124,13 @@ static struct panel_desc_s panel_desc = { .panel_name = "BJX2836F0-480x640",
+     .hs_timing_cfg = &hs_timing_cfg_dsi_bjx2836f0_480x640_NULL_2lane_60fps,
+     .dsi_init_cmds = dsi_init_cmds_dsi_bjx2836f0_480x640_NULL_2lane_60fps,
+     .dsi_init_cmds_size = ARRAY_SIZE(dsi_init_cmds_dsi_bjx2836f0_480x640_NULL_2lane_60fps) };
++#elif CONFIG_DSI_LY030BXMS_480X640_NULL_2LANE_60FPS
++#include "panels/dsi_ly030bxms_480x640_NULL_2lane_60fps.h"
++static struct panel_desc_s panel_desc = { .panel_name = "LY030BXMS-480x640",
++    .dev_cfg = &dev_cfg_dsi_ly030bxms_480x640_NULL_2lane_60fps,
++    .hs_timing_cfg = &hs_timing_cfg_dsi_ly030bxms_480x640_NULL_2lane_60fps,
++    .dsi_init_cmds = dsi_init_cmds_dsi_ly030bxms_480x640_NULL_2lane_60fps,
++    .dsi_init_cmds_size = ARRAY_SIZE(dsi_init_cmds_dsi_ly030bxms_480x640_NULL_2lane_60fps) };
+ #elif CONFIG_DSI_ILI9488_320X480_NULL_1LANE_60FPS
+ #include "panels/dsi_ili9488_320x480_NULL_1lane_60fps.h"
+ static struct panel_desc_s panel_desc = { .panel_name = "ILI9488-320x480-NULL-1lane-60fps",
+diff --git a/panels/dsi_ly030bxms_480x640_NULL_2lane_60fps.h b/panels/dsi_ly030bxms_480x640_NULL_2lane_60fps.h
+new file mode 100644
+index 0000000..569890b
+--- /dev/null
++++ b/panels/dsi_ly030bxms_480x640_NULL_2lane_60fps.h
+@@ -0,0 +1,105 @@
++#ifndef PANELS_DSI_LY030BXMS_480X640_NULL_2LANE_60FPS_H
++#define PANELS_DSI_LY030BXMS_480X640_NULL_2LANE_60FPS_H
++
++#include "panel_platform.h"
++
++#define DSI_LY030BXMS_480X640_NULL_2LANE_60FPS_VACT 640
++#define DSI_LY030BXMS_480X640_NULL_2LANE_60FPS_VSA 2
++#define DSI_LY030BXMS_480X640_NULL_2LANE_60FPS_VBP 20
++#define DSI_LY030BXMS_480X640_NULL_2LANE_60FPS_VFP 20
++
++#define DSI_LY030BXMS_480X640_NULL_2LANE_60FPS_HACT 480
++#define DSI_LY030BXMS_480X640_NULL_2LANE_60FPS_HSA 12
++#define DSI_LY030BXMS_480X640_NULL_2LANE_60FPS_HBP 80
++#define DSI_LY030BXMS_480X640_NULL_2LANE_60FPS_HFP 80
++#define DSI_LY030BXMS_480X640_NULL_2LANE_60FPS_FPS 60
++
++struct combo_dev_cfg_s dev_cfg_dsi_ly030bxms_480x640_NULL_2lane_60fps = {
++    .devno = 0,
++    .lane_id = { MIPI_TX_LANE_CLK, MIPI_TX_LANE_0, MIPI_TX_LANE_1, -1, -1 },
++    .lane_pn_swap = { false, false, false, false, false },
++    .output_mode = OUTPUT_MODE_DSI_VIDEO,
++    .video_mode = BURST_MODE,
++    .output_format = OUT_FORMAT_RGB_24_BIT,
++    .sync_info = {
++        .vid_hsa_pixels = DSI_LY030BXMS_480X640_NULL_2LANE_60FPS_HSA,
++        .vid_hbp_pixels = DSI_LY030BXMS_480X640_NULL_2LANE_60FPS_HBP,
++        .vid_hfp_pixels = DSI_LY030BXMS_480X640_NULL_2LANE_60FPS_HFP,
++        .vid_hline_pixels = DSI_LY030BXMS_480X640_NULL_2LANE_60FPS_HACT,
++        .vid_vsa_lines = DSI_LY030BXMS_480X640_NULL_2LANE_60FPS_VSA,
++        .vid_vbp_lines = DSI_LY030BXMS_480X640_NULL_2LANE_60FPS_VBP,
++        .vid_vfp_lines = DSI_LY030BXMS_480X640_NULL_2LANE_60FPS_VFP,
++        .vid_active_lines = DSI_LY030BXMS_480X640_NULL_2LANE_60FPS_VACT,
++        .vid_vsa_pos_polarity = true,
++        .vid_hsa_pos_polarity = false,
++    },
++    .pixel_clk = PIXEL_CLK(DSI_LY030BXMS_480X640_NULL_2LANE_60FPS),
++};
++
++struct hs_settle_s hs_timing_cfg_dsi_ly030bxms_480x640_NULL_2lane_60fps = { .prepare = 6, .zero = 32, .trail = 1 };
++
++struct dsc_instr dsi_init_cmds_dsi_ly030bxms_480x640_NULL_2lane_60fps[] = {
++    DSI_CMD_TYPE(0, 0x29, 0xFF, 0x77, 0x01, 0x00, 0x00, 0x13),
++    DSI_CMD_TYPE(0, 0x15, 0xEF, 0x08),
++    DSI_CMD_TYPE(0, 0x29, 0xFF, 0x77, 0x01, 0x00, 0x00, 0x10),
++    DSI_CMD_TYPE(0, 0x29, 0xC0, 0x4F, 0x00),
++    DSI_CMD_TYPE(0, 0x29, 0xC1, 0x15, 0x0C),
++    DSI_CMD_TYPE(0, 0x29, 0xC2, 0x07, 0x0A),
++    DSI_CMD_TYPE(0, 0x15, 0xC7, 0x04),
++    DSI_CMD_TYPE(0, 0x15, 0xCC, 0x10),
++    DSI_CMD_TYPE(
++        0, 0x29, 0xB0, 0x00, 0x10, 0x17, 0x0E, 0x12, 0x06, 0x0B, 0x09, 0x07, 0x27,
++        0x04, 0x11, 0x10, 0x2E, 0x31, 0x1F),
++    DSI_CMD_TYPE(
++        0, 0x29, 0xB1, 0x0A, 0x11, 0x17, 0x0C, 0x0F, 0x06, 0x04, 0x09, 0x09, 0x1F,
++        0x05, 0x13, 0x11, 0x26, 0x37, 0x1F),
++    DSI_CMD_TYPE(0, 0x29, 0xFF, 0x77, 0x01, 0x00, 0x00, 0x11),
++    DSI_CMD_TYPE(0, 0x15, 0xB0, 0x45),
++    DSI_CMD_TYPE(0, 0x15, 0xB1, 0x64),
++    DSI_CMD_TYPE(0, 0x15, 0xB2, 0x81),
++    DSI_CMD_TYPE(0, 0x15, 0xB3, 0x80),
++    DSI_CMD_TYPE(0, 0x15, 0xB5, 0x4E),
++    DSI_CMD_TYPE(0, 0x15, 0xB7, 0x85),
++    DSI_CMD_TYPE(0, 0x15, 0xB8, 0x33),
++    DSI_CMD_TYPE(0, 0x15, 0xC0, 0x89),
++    DSI_CMD_TYPE(0, 0x15, 0xB9, 0x10),
++    DSI_CMD_TYPE(0, 0x15, 0xC1, 0x78),
++    DSI_CMD_TYPE(0, 0x15, 0xC2, 0x78),
++    DSI_CMD_TYPE(0, 0x15, 0xD0, 0x88),
++    DSI_CMD_TYPE(0, 0x29, 0xE0, 0x00, 0xA0, 0x02),
++    DSI_CMD_TYPE(
++        0, 0x29, 0xE1, 0x05, 0xA0, 0x07, 0xA0, 0x06, 0xA0, 0x08, 0xA0, 0x00, 0x44, 0x44),
++    DSI_CMD_TYPE(
++        0, 0x29, 0xE2, 0x20, 0x20, 0x40, 0x40, 0x96, 0xA0, 0x00, 0x00, 0x96, 0xA0, 0x00, 0x00, 0x00, 0x00),
++    DSI_CMD_TYPE(0, 0x29, 0xE3, 0x00, 0x00, 0x22, 0x22),
++    DSI_CMD_TYPE(0, 0x29, 0xE4, 0x44, 0x44),
++    DSI_CMD_TYPE(
++        0, 0x29, 0xE5, 0x0E, 0x97, 0x30, 0xA0, 0x10, 0x99, 0x30, 0xA0,
++        0x0A, 0x93, 0x30, 0xA0, 0x0C, 0x95, 0x30, 0xA0),
++    DSI_CMD_TYPE(0, 0x29, 0xE6, 0x00, 0x00, 0x22, 0x22),
++    DSI_CMD_TYPE(0, 0x29, 0xE7, 0x44, 0x44),
++    DSI_CMD_TYPE(
++        0, 0x29, 0xE8, 0x0D, 0x96, 0x30, 0xA0, 0x0F, 0x98, 0x30, 0xA0,
++        0x09, 0x92, 0x30, 0xA0, 0x0B, 0x94, 0x30, 0xA0),
++    DSI_CMD_TYPE(0, 0x29, 0xEB, 0x00, 0x01, 0x4E, 0x4E, 0x44, 0x88, 0x40),
++    DSI_CMD_TYPE(0, 0x29, 0xEC, 0x90, 0x00),
++    DSI_CMD_TYPE(
++        0, 0x29, 0xED, 0x77, 0x66, 0x55, 0x44, 0xA8, 0x9F, 0x02, 0xBF,
++        0xFB, 0x20, 0xF9, 0x8A, 0x44, 0x55, 0x66, 0x77),
++    DSI_CMD_TYPE(0, 0x29, 0xEF, 0x08, 0x08, 0x08, 0x45, 0x3F, 0x54),
++    DSI_CMD_TYPE(0, 0x29, 0xFF, 0x77, 0x01, 0x00, 0x00, 0x13),
++    DSI_CMD_TYPE(0, 0x29, 0xE8, 0x00, 0x0E),
++    DSI_CMD_TYPE(0, 0x29, 0xFF, 0x77, 0x01, 0x00, 0x00, 0x00),
++    DSI_CMD_TYPE(120, 0x05, 0x11),  /* SLEEP OUT */
++    DSI_CMD_TYPE(0, 0x29, 0xFF, 0x77, 0x01, 0x00, 0x00, 0x13),
++    DSI_CMD_TYPE(0, 0x29, 0xE8, 0x00, 0x0C),
++    DSI_CMD_TYPE(10, 0x29, 0xE8, 0x00, 0x00),
++    DSI_CMD_TYPE(0, 0x29, 0xFF, 0x77, 0x01, 0x00, 0x00, 0x00),
++    DSI_CMD_TYPE(0, 0x15, 0x36, 0x10),
++    DSI_CMD_TYPE(0, 0x05, 0x29),  /* DISPLAY ON */
++    DSI_CMD_TYPE(20, 0x15, 0x35, 0x00),  /* TE ON */
++};
++
++#else
++#error "MIPI_TX_PARAM multi-delcaration!!"
++#endif // PANELS_DSI_LY030BXMS_480X640_NULL_2LANE_60FPS_H
+-- 
+2.25.1
+

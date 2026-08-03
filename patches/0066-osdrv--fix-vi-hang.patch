@@ -1,7 +1,7 @@
-From 1a4f1f7d727b354b245403e2fad2463f7e1bf721 Mon Sep 17 00:00:00 2001
+From a91d1c3a1b5f58f585ac22cf1b5fb3f968b21341 Mon Sep 17 00:00:00 2001
 From: "xiaole.chen" <xiaole.chen@sophgo.com>
 Date: Tue, 28 Jul 2026 20:11:34 +0800
-Subject: [PATCH 84/84] fix:vi reinit
+Subject: [PATCH] fix: vi hang
 
 Change-Id: Iebbdc47fa05930c2b8ff4941629f4b6621222615
 ---

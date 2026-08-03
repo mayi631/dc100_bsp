@@ -1,7 +1,7 @@
-From 990c2ccc216d82ed78757393f4a51081408bc85a Mon Sep 17 00:00:00 2001
+From c5a44993586d4c33b43279f84f7bae06062293e2 Mon Sep 17 00:00:00 2001
 From: "song.yu" <song.yu@sophgo.com>
 Date: Wed, 24 Dec 2025 15:42:32 +0800
-Subject: [PATCH 78/84] feat: add panel LY030BXMS, ic:7701s
+Subject: [PATCH 2/5] feat: add panel LY030BXMS, ic:7701s
 
 Change-Id: I189167289f6f72ed103aa1aa9dee69cec0735d92
 ---

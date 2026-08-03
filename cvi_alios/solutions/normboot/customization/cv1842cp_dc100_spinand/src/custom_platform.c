@@ -357,7 +357,7 @@ int PLATFORM_PanelInit(void)
 	udelay(20 * 1000);
 	_GPIOSetValue(rst_port, rst_pin, 1);
 	udelay(20 * 1000);
-#elif CONFIG_PANEL_LY030BXMS
+#elif CONFIG_DSI_LY030BXMS_480X640_NULL_2LANE_60FPS
 	u8 rst_port = 0, rst_pin = 15;
 	_GPIOSetValue(rst_port, rst_pin, 1);
 	udelay(20 * 1000);
