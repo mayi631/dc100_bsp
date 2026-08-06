@@ -1,7 +1,7 @@
 From 4473dd72e251b82d8c4583292b6b641ee6e5ac1f Mon Sep 17 00:00:00 2001
 From: "xiu.yang" <xiu.yang@sophgo.com>
 Date: Fri, 24 Jul 2026 08:26:15 +0800
-Subject: [PATCH 4/5] fix:add logs for vo
+Subject: [PATCH] fix:add logs for vo
 
 Change-Id: I3def4571eeb3ab751db7518943e3df27f9a3aa88
 ---

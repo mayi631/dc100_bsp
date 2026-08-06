@@ -1,7 +1,7 @@
 From 695ec8b74f20d90af706caa4115751f670d35bc5 Mon Sep 17 00:00:00 2001
 From: "qiliang.zhou" <qiliang.zhou@sophgo.com>
 Date: Mon, 15 Jun 2026 15:34:29 +0800
-Subject: [PATCH 3/5] (vo):Fix vo driver bug
+Subject: [PATCH] (vo):Fix vo driver bug
 
 [description]:NA
 [root cause]:NA

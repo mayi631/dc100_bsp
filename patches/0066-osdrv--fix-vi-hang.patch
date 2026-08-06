@@ -1,4 +1,4 @@
-From a91d1c3a1b5f58f585ac22cf1b5fb3f968b21341 Mon Sep 17 00:00:00 2001
+From 49de1164c0bd61c13180a80c182fcd502010e2db Mon Sep 17 00:00:00 2001
 From: "xiaole.chen" <xiaole.chen@sophgo.com>
 Date: Tue, 28 Jul 2026 20:11:34 +0800
 Subject: [PATCH] fix: vi hang

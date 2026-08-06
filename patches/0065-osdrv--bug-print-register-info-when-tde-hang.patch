@@ -1,7 +1,7 @@
-From a06480fb0d1e6aa08eb3c8306d948c2c339c751f Mon Sep 17 00:00:00 2001
+From 80b953dfd1c17015835946de794414783c284adc Mon Sep 17 00:00:00 2001
 From: "weiyong.luo" <weiyong.luo@sophgo.com>
 Date: Fri, 24 Jul 2026 11:04:38 +0800
-Subject: [PATCH 5/5] [bug]: Print register info when the tde hang.
+Subject: [PATCH] [bug]: Print register info when the tde hang.
 
 [description ]: NA
 [root cause  ]: NA
@@ -12,15 +12,14 @@ Subject: [PATCH 5/5] [bug]: Print register info when the tde hang.
 
 Change-Id: I3ffd329051f11e0a43555abd58659f0496ef9b44
 ---
- interdrv/tde/chip/cv184x/tde_ip_ctrl.c   |   5 +
- interdrv/tde/chip/cv184x/tde_ip_ctrl.h   |   2 +
- interdrv/tde/chip/cv184x/tde_reg.c       | 111 +++++++++++++++++++++++
- interdrv/tde/chip/cv184x/tde_reg.h       |   2 +
- interdrv/tde/driver/tde_core.c           |  47 ++++++++--
- interdrv/tde/platform/linux/tde_dev.c    |   5 -
- interdrv/tde/platform/linux/tde_proc.c   |   3 +-
- interdrv/vi/chip/cv184x/vi_subsys_ctrl.c |   2 +-
- 8 files changed, 162 insertions(+), 15 deletions(-)
+ interdrv/tde/chip/cv184x/tde_ip_ctrl.c |  5 +++
+ interdrv/tde/chip/cv184x/tde_ip_ctrl.h |  2 +
+ interdrv/tde/chip/cv184x/tde_reg.c     | 58 ++++++++++++++++++++++++++
+ interdrv/tde/chip/cv184x/tde_reg.h     |  2 +
+ interdrv/tde/driver/tde_core.c         | 45 +++++++++++++++-----
+ interdrv/tde/platform/linux/tde_dev.c  | 11 ++---
+ interdrv/tde/platform/linux/tde_proc.c |  3 +-
+ 7 files changed, 109 insertions(+), 17 deletions(-)
 
 diff --git a/interdrv/tde/chip/cv184x/tde_ip_ctrl.c b/interdrv/tde/chip/cv184x/tde_ip_ctrl.c
 index b5198960..9c616953 100644
@@ -48,62 +47,13 @@ index ce179e45..d323e73a 100644
  
  #endif
 diff --git a/interdrv/tde/chip/cv184x/tde_reg.c b/interdrv/tde/chip/cv184x/tde_reg.c
-index ba9cbc24..c809c309 100644
+index ba9cbc24..4de81584 100644
 --- a/interdrv/tde/chip/cv184x/tde_reg.c
 +++ b/interdrv/tde/chip/cv184x/tde_reg.c
-@@ -97,4 +97,115 @@ void tde_toggle_reset(void)
+@@ -97,4 +97,62 @@ void tde_toggle_reset(void)
  	osal_iounmap(vi_sys_addr, 4);
  }
  
-+u32 read_isp_top_clk(void)
-+{
-+	void *clk_addr = NULL;
-+	u32 mask = BIT(9);
-+	u32 value;
-+
-+	clk_addr = osal_ioremap((unsigned long)0x30020f0, 4);
-+	if (!clk_addr) {
-+		TRACE_TDE(DBG_ERR, "osal_ioremap fail.\n");
-+		return 0;
-+	}
-+
-+	value = _reg_read((uintptr_t)clk_addr);
-+	osal_iounmap(clk_addr, 4);
-+
-+	return value & mask;
-+}
-+
-+u32 read_isp_top_dbus(void)
-+{
-+	void *isp_top_addr = NULL;
-+	u32 value;
-+
-+	isp_top_addr = osal_ioremap((unsigned long)0x0a070040, 0x20);
-+	if (!isp_top_addr) {
-+		TRACE_TDE(DBG_ERR, "osal_ioremap fail.\n");
-+		return 0;
-+	}
-+
-+	value = _reg_read((uintptr_t)isp_top_addr);
-+	TRACE_TDE(DBG_ERR, "isp top reg_dbus0 : %0xx\n", value);
-+
-+	value = _reg_read((uintptr_t)isp_top_addr + 0x4);
-+	TRACE_TDE(DBG_ERR, "isp top reg_dbus1 : %0xx\n", value);
-+
-+	value = _reg_read((uintptr_t)isp_top_addr + 0x8);
-+	TRACE_TDE(DBG_ERR, "isp top reg_dbus2 : %0xx\n", value);
-+
-+	value = _reg_read((uintptr_t)isp_top_addr + 0xc);
-+	TRACE_TDE(DBG_ERR, "isp top reg_dbus3 : %0xx\n", value);
-+
-+	value = _reg_read((uintptr_t)isp_top_addr + 0x18);
-+	TRACE_TDE(DBG_ERR, "isp top reg_dbus4 : %0xx\n", value);
-+
-+	osal_iounmap(isp_top_addr, 0x20);
-+
-+	return 0;
-+}
-+
 +void tde_dump_reg(void)
 +{
 +	TRACE_TDE(DBG_ERR, "===== TDE reg dump =====\n");
@@ -161,11 +111,7 @@ index ba9cbc24..c809c309 100644
 +		TDE_REG_BW_LIMIT_RD, _reg_read(reg_base + TDE_REG_BW_LIMIT_RD));
 +	TRACE_TDE(DBG_ERR, "BW_LIMIT_WR           [0x%02x]: 0x%08x\n",
 +		TDE_REG_BW_LIMIT_WR, _reg_read(reg_base + TDE_REG_BW_LIMIT_WR));
-+
-+	TRACE_TDE(DBG_ERR, "---isp top clk is %s.\n", read_isp_top_clk() ? "open" : "close");
-+	read_isp_top_dbus();
 +}
-+
  
 diff --git a/interdrv/tde/chip/cv184x/tde_reg.h b/interdrv/tde/chip/cv184x/tde_reg.h
 index cd74df91..ed338893 100644
@@ -179,23 +125,29 @@ index cd74df91..ed338893 100644
 +
  #endif
 diff --git a/interdrv/tde/driver/tde_core.c b/interdrv/tde/driver/tde_core.c
-index 16c3a212..d5d2bf10 100644
+index 16c3a212..1680a156 100644
 --- a/interdrv/tde/driver/tde_core.c
 +++ b/interdrv/tde/driver/tde_core.c
-@@ -3,6 +3,39 @@
+@@ -3,18 +3,37 @@
  #include "tde_ip_ctrl.h"
  #include "base_ctx.h"
  
+-static void _tde_remove_task(struct tde_job *job)
 +static void _tde_status(struct tde_job *job)
-+{
-+	struct tde_task *task;
+ {
+ 	struct tde_task *task;
 +	int idx = 0;
 +
 +	TRACE_TDE(DBG_ERR, "===== job status =====\n");
 +	TRACE_TDE(DBG_ERR, "hdl(%d), task_cnt(%d), is_sync(%d), is_block(%d)\n",
 +		job->hdl, osal_atomic_read(&job->task_cnt), job->is_sync, job->is_block);
-+
-+	osal_mutex_lock(&job->lock);
+ 
+ 	osal_mutex_lock(&job->lock);
+-	while (!osal_list_empty(&job->task_list)) {
+-		task = osal_list_first_entry(&job->task_list,
+-			struct tde_task, item);
+-		osal_list_del_init(&task->item);
+-		osal_vfree(task);
 +	osal_list_for_each_entry(task, &job->task_list, item) {
 +		TRACE_TDE(DBG_ERR, "pending task[%d]: mode(%d)\n", idx, task->mode);
 +		TRACE_TDE(DBG_ERR, "  src: w(%d) h(%d) stride(%d) addr(%llx) fmt(%d)\n",
@@ -211,77 +163,73 @@ index 16c3a212..d5d2bf10 100644
 +				task->line.color, task->line.thick);
 +		}
 +		idx++;
-+	}
-+	osal_mutex_unlock(&job->lock);
+ 	}
+ 	osal_mutex_unlock(&job->lock);
 +
 +	TRACE_TDE(DBG_ERR, "pending task count in list(%d)\n", idx);
 +
 +	tde_ip_dump_status();
-+}
-+
- static void _tde_remove_task(struct tde_job *job)
- {
- 	struct tde_task *task;
-@@ -71,6 +104,7 @@ static void _tde_job_process(struct tde_job *job, osal_semaphore *sem)
+ }
+ 
+ static void _tde_task_run(struct tde_task *task)
+@@ -61,21 +80,23 @@ static void _tde_job_process(struct tde_job *job, osal_semaphore *sem)
+ 		osal_mutex_lock(&job->lock);
+ 		task = osal_list_first_entry(&job->task_list,
+ 			struct tde_task, item);
+-		osal_list_del_init(&task->item);
+ 		osal_mutex_unlock(&job->lock);
+ 
+ 		_tde_task_run(task);
+ 		TRACE_TDE(DBG_INFO, "***running task(%d), handle(%d)***.\n", task->mode, job->hdl);
+ 
+-		osal_vfree(task);
  		ret = osal_sem_down_timeout(sem, timeout);
  		if (ret != OSAL_SUCCESS) {
  			TRACE_TDE(DBG_ERR, "TDE timeout, HW hang.\n");
 +			_tde_status(job);
  			tde_ip_reset();
- 			_tde_remove_task(job);
- 			break;
-@@ -117,9 +151,7 @@ static int tde_event_handler(void *arg)
- 		osal_list_del_init(&job->item);
- 		osal_spin_unlock(&core->lock);
+-			_tde_remove_task(job);
+-			break;
++			continue;
+ 		}
  
--		osal_clk_enable(core->clk);
- 		_tde_job_process(job, &core->sem_intr);
--		osal_clk_disable(core->clk);
- 
- 		osal_atomic_dec(&core->job_num);
++		osal_mutex_lock(&job->lock);
++		osal_list_del_init(&task->item);
++		osal_mutex_unlock(&job->lock);
++		osal_vfree(task);
+ 		osal_atomic_dec(&job->task_cnt);
  	}
-@@ -147,6 +179,8 @@ int tde_core_init(struct tde_core *core)
- 		return -1;
- 	}
- 	osal_kthread_set_priority(core->thread, MM_THREAD_PRIO);
-+	osal_clk_prepare_enable(core->clk);
-+	tde_ip_init();
  
- 	return 0;
- }
-@@ -167,14 +201,14 @@ int tde_core_deinit(struct tde_core *core)
- 	osal_sem_destroy(&core->sem_job);
- 	osal_sem_destroy(&core->sem_intr);
- 
-+	tde_ip_deinit();
-+	osal_clk_disable_unprepare(core->clk);
+@@ -175,6 +196,7 @@ int tde_core_open(struct tde_core *core)
+ 	osal_clk_prepare_enable(core->clk);
+ 	tde_ip_init();
+ 	osal_clk_disable(core->clk);
 +
  	return 0;
  }
  
- int tde_core_open(struct tde_core *core)
- {
--	osal_clk_prepare_enable(core->clk);
--	tde_ip_init();
--	osal_clk_disable(core->clk);
- 	return 0;
- }
- 
-@@ -184,9 +218,6 @@ int tde_core_release(struct tde_core *core)
+@@ -184,8 +206,9 @@ int tde_core_release(struct tde_core *core)
  		osal_msleep(1);
  	}
  
--	tde_ip_deinit();
++	osal_clk_enable(core->clk);
+ 	tde_ip_deinit();
 -	osal_clk_unprepare(core->clk);
--
++	osal_clk_disable_unprepare(core->clk);
+ 
  	return 0;
  }
- 
 diff --git a/interdrv/tde/platform/linux/tde_dev.c b/interdrv/tde/platform/linux/tde_dev.c
-index 193ff81d..293cd44d 100644
+index 193ff81d..030a2b26 100644
 --- a/interdrv/tde/platform/linux/tde_dev.c
 +++ b/interdrv/tde/platform/linux/tde_dev.c
-@@ -38,15 +38,10 @@ static int tde_exec_cb(void *dev, cb_modules_id caller, unsigned int cmd, void *
+@@ -35,18 +35,16 @@ static int tde_exec_cb(void *dev, cb_modules_id caller, unsigned int cmd, void *
+ 	struct tde_inter_cfg *cfg;
+ 	int rc = -1;
+ 
++	if (osal_atomic_inc_return(&dev_data->open_count) == 1)
++		tde_core_open(&dev_data->core);
++
  	switch (cmd) {
  		case TDE_CB_OP: {
  			cfg = (struct tde_inter_cfg *)arg;
@@ -297,6 +245,16 @@ index 193ff81d..293cd44d 100644
  			break;
  		}
  		default: {
+@@ -55,6 +53,9 @@ static int tde_exec_cb(void *dev, cb_modules_id caller, unsigned int cmd, void *
+ 		}
+ 	}
+ 
++	if (osal_atomic_dec_return(&dev_data->open_count) == 0)
++		tde_core_release(&dev_data->core);
++
+ 	return rc;
+ }
+ 
 diff --git a/interdrv/tde/platform/linux/tde_proc.c b/interdrv/tde/platform/linux/tde_proc.c
 index f5b69874..93827805 100644
 --- a/interdrv/tde/platform/linux/tde_proc.c
@@ -318,19 +276,6 @@ index f5b69874..93827805 100644
  	return 0;
  }
  
-diff --git a/interdrv/vi/chip/cv184x/vi_subsys_ctrl.c b/interdrv/vi/chip/cv184x/vi_subsys_ctrl.c
-index c984fc0b..69bba850 100755
---- a/interdrv/vi/chip/cv184x/vi_subsys_ctrl.c
-+++ b/interdrv/vi/chip/cv184x/vi_subsys_ctrl.c
-@@ -355,7 +355,7 @@ void ispblk_isptop_config(struct isp_ctx *ctx)
- 
- 	ISP_WR_REG(isptopb, reg_isp_top_t, scenarios_ctrl, scene_ctrl.raw);
- 
--	ISP_WR_BITS(isptopb, reg_isp_top_t, dummy, dbus_sel, 4);
-+	ISP_WR_BITS(isptopb, reg_isp_top_t, dummy, dbus_sel, 9);
- 	//ISP_WR_REG(isptopb, reg_isp_top_t, reg_1c, 7);
- 
- 	//af llsc clsc
 -- 
 2.25.1
 
