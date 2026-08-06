@@ -63,30 +63,33 @@
 		io-channel-names = "buttons";
 		keyup-threshold-microvolt = <4095000>; // raw value
 		poll-interval = <20>; // ms
-		debounce-steps = <2>; // 2次采样值相同才认为按键状态改变
 
 		button-left {
 			label = "S Sw";
 			linux,code = <KEY_PLAY>;
 			press-threshold-microvolt = <21000>;
+			debounce-steps = <2>; // 2次采样解析为同一按键状态才认为改变
 		};
 
 		button-up {
 			label = "Up";
 			linux,code = <KEY_UP>;
 			press-threshold-microvolt = <820000>;
+			debounce-steps = <2>;
 		};
 
 		button-down {
 			label = "Down";
 			linux,code = <KEY_DOWN>;
 			press-threshold-microvolt = <1632000>;
+			debounce-steps = <2>;
 		};
 
 		button-ok {
 			label = "Ok";
 			linux,code = <KEY_OK>;
 			press-threshold-microvolt = <2456000>;
+			debounce-steps = <2>;
 		};
 	};
 
