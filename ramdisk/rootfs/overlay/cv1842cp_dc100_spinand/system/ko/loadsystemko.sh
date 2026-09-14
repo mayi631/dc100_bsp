@@ -7,7 +7,6 @@ ${CVI_SHOPTS}
 modules_seq="
 /system/ko/cv184x_osal.ko
 /system/ko/cv184x_base.ko
-/system/ko/cv184x_tde.ko
 /system/ko/cvi_ipcm.ko
 /system/ko/hyn_ts.ko
 /system/ko/aic8800_bsp.ko
@@ -31,7 +30,7 @@ insmod /system/ko/aic8800_fdrv.ko aicwf_dbg_level=3
 insmod /system/ko/3rd/8189fs.ko
 
 # 640*480*4/1024=1200, double buffer 2400 KB. 270 degree rotation
-insmod /system/ko/cv184x_gfbg.ko video="gfbg:vram0_size:2400" tde_rot=2
+insmod /system/ko/cv184x_gfbg.ko video="gfbg:vram0_size:2400" tde_rot=0
 
 echo 3 > /proc/sys/vm/drop_caches
 dmesg -n 4

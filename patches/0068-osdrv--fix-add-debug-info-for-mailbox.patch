@@ -1,0 +1,82 @@
+From 9c21696c788adde8c9029f0209ffc01d6a8be3f7 Mon Sep 17 00:00:00 2001
+From: "xiu.yang" <xiu.yang@sophgo.com>
+Date: Thu, 27 Aug 2026 11:44:38 +0800
+Subject: [PATCH 2/3] fix:add debug info for mailbox
+
+Change-Id: I4f013b2083717d536c5831eb053a2a585465873c
+---
+ interdrv/ipcm/driver/src/cvi_spinlock.c   |  8 +++++++-
+ interdrv/ipcm/driver/src/mailbox.c        |  4 ++--
+ interdrv/ipcm/platform/linux/src/ipcmsg.c | 11 +++++++++--
+ 3 files changed, 18 insertions(+), 5 deletions(-)
+
+diff --git a/interdrv/ipcm/driver/src/cvi_spinlock.c b/interdrv/ipcm/driver/src/cvi_spinlock.c
+index b9e7c8d4..01835853 100644
+--- a/interdrv/ipcm/driver/src/cvi_spinlock.c
++++ b/interdrv/ipcm/driver/src/cvi_spinlock.c
+@@ -101,10 +101,16 @@ int hw_spin_lock(hw_raw_spinlock_t *lock)
+ 			return MAILBOX_LOCK_SUCCESS;
+ 		}
+ 		spin_unlock_irqrestore(&reg_write_lock_ext, reg_write_flags_ext);
++		if (i == 100000) {
++			ipcm_err("hw_spin_lock waiting >100ms! field:%u C906L_pc=0x%x reg_val=0x%x\n",
++				lock->hw_field, ipcmpa_readpc(c906l_pc_reg),
++				readw((void *)(reg_base + sizeof(int) * lock->hw_field)));
++		}
+ 		udelay(1);
+ 	}
+ 
+-	ipcm_err("__spin_lock_debug fail! locks:%u field:%u loops = %lld\n", lock->locks, lock->hw_field, loops);
++	ipcm_err("__spin_lock_debug fail! locks:%u field:%u loops = %lld C906L_pc=0x%x\n",
++		lock->locks, lock->hw_field, loops, ipcmpa_readpc(c906l_pc_reg));
+ 	return MAILBOX_LOCK_FAILED;
+ }
+ 
+diff --git a/interdrv/ipcm/driver/src/mailbox.c b/interdrv/ipcm/driver/src/mailbox.c
+index 8165e37e..d2e10aa1 100644
+--- a/interdrv/ipcm/driver/src/mailbox.c
++++ b/interdrv/ipcm/driver/src/mailbox.c
+@@ -112,8 +112,8 @@ s32 mailbox_send(MsgData *msg)
+ 
+ 	drv_spin_lock_irqsave_ext(&mailbox_lock, flags);
+ 	if (flags == MAILBOX_LOCK_FAILED) {
+-		// ipcm_err("[%s][%d] drv_spin_lock_irqsave failed! ip_id = %d , cmd_id = %d\n" ,
+-		// cmdq->ip_id , cmdq->cmd_id);
++		ipcm_err("mailbox_send lock FAILED! grp_id=%d msg_id=%d func_type=%d\n",
++			msg->grp_id, msg->msg_id, msg->func_type);
+ 		return -EMLOCK;
+ 	}
+ 
+diff --git a/interdrv/ipcm/platform/linux/src/ipcmsg.c b/interdrv/ipcm/platform/linux/src/ipcmsg.c
+index 3aebffa5..01358682 100644
+--- a/interdrv/ipcm/platform/linux/src/ipcmsg.c
++++ b/interdrv/ipcm/platform/linux/src/ipcmsg.c
+@@ -555,8 +555,13 @@ int ipcmsg_send_sync(int s32Id, CVI_IPCMSG_MESSAGE_S *pstMsg,
+ 	mutex_unlock(&s_req_lock);
+ 
+ 	//send msg
++	CVI_TRACE_IPCMSG(CVI_DBG_INFO, "send_sync: module=0x%x cmd=%d id=%llu timeout=%d\n",
++		pstMsg->u32Module, pstMsg->u32CMD,
++		(unsigned long long)pstMsg->u64Id, s32TimeoutMs);
+ 	if (_send_msg(pstMsg)) {
+-		CVI_TRACE_IPCMSG(CVI_DBG_ERR, "_send_msg failed.");
++		CVI_TRACE_IPCMSG(CVI_DBG_ERR, "_send_msg failed! module=0x%x cmd=%d id=%llu\n",
++			pstMsg->u32Module, pstMsg->u32CMD,
++			(unsigned long long)pstMsg->u64Id);
+ 		goto err;
+ 	}
+ 	atomic_fetch_add(1, &s_status.SendSyncCnt);
+@@ -577,7 +582,9 @@ int ipcmsg_send_sync(int s32Id, CVI_IPCMSG_MESSAGE_S *pstMsg,
+ 		*ppstMsg = item->pstRespMsg;
+ 	} else {
+ 		s32Ret = -1;
+-		CVI_TRACE_IPCMSG(CVI_DBG_ERR, "timeout %dms.", s32TimeoutMs);
++		CVI_TRACE_IPCMSG(CVI_DBG_ERR, "send_sync timeout %dms! module=0x%x cmd=%d id=%llu\n",
++			s32TimeoutMs, pstMsg->u32Module, pstMsg->u32CMD,
++			(unsigned long long)pstMsg->u64Id);
+ 	}
+ 
+ err:
+-- 
+2.25.1
+

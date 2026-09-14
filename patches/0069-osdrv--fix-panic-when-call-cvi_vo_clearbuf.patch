@@ -1,0 +1,30 @@
+From 6b8c73897cdf26605e22b933201647c67af297f2 Mon Sep 17 00:00:00 2001
+From: "xiu.yang" <xiu.yang@sophgo.com>
+Date: Mon, 14 Sep 2026 09:50:36 +0800
+Subject: [PATCH 3/3] fix:panic when call cvi_vo_clearbuf
+
+Change-Id: I45d543ab48087b02cfad339f79040df5a2a645b0
+---
+ interdrv/vo/driver/vo_sdk_layer.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/interdrv/vo/driver/vo_sdk_layer.c b/interdrv/vo/driver/vo_sdk_layer.c
+index f1502bcc..be3c40e5 100644
+--- a/interdrv/vo/driver/vo_sdk_layer.c
++++ b/interdrv/vo/driver/vo_sdk_layer.c
+@@ -1664,9 +1664,9 @@ static int vo_clear_chnbuf(vo_layer layer, vo_chn chn, bool clear)
+ 
+ 
+ 
+-	release_buffer(layer_ctx, &layer_ctx->list_done);
+-	release_buffer(layer_ctx, &layer_ctx->list_work);
+-	release_buffer(layer_ctx, &layer_ctx->list_wait);
++	// release_buffer(layer_ctx, &layer_ctx->list_done);
++	// release_buffer(layer_ctx, &layer_ctx->list_work);
++	// release_buffer(layer_ctx, &layer_ctx->list_wait);
+ 
+ 	osal_mutex_unlock(&layer_ctx->layer_lock);
+ 
+-- 
+2.25.1
+
