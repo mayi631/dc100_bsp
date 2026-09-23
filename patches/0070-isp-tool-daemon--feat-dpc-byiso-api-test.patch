@@ -1,0 +1,552 @@
+From a869e223001b66dc2da58281e973fb69e5668cc6 Mon Sep 17 00:00:00 2001
+From: "mason.zou" <mason.zou@sophgo.com>
+Date: Mon, 7 Sep 2026 19:57:28 +0800
+Subject: [PATCH] (auto_test): update auto test code [description ]:regen
+ DPC_api_test.c for Dark/BrightDefectThresh byISO: split into _manual/_auto
+ tests (auto dims 5x16), paired with isp repo change of the same Change-Id
+ [root cause]:NA [JIRA ID]:NA [chip project]:cv184x [side effects]:NA
+ [Affected *.ko/*.so/*.a] :NA
+
+Change-Id: I0b9fda139ac13427e3fd7bb51983cf7a7cb50785
+---
+ isp_test/api_test/DPC_api_test.c | 428 +++++++++++++++++++++++++++++--
+ 1 file changed, 400 insertions(+), 28 deletions(-)
+
+diff --git a/isp_test/api_test/DPC_api_test.c b/isp_test/api_test/DPC_api_test.c
+index 01f45da..d17da6c 100644
+--- a/isp_test/api_test/DPC_api_test.c
++++ b/isp_test/api_test/DPC_api_test.c
+@@ -199,7 +199,7 @@ static void __attribute__((constructor)) reg_test_DPC_DPDynamicAttr_UpdateInterv
+ 	reg_api_test_fn(test_DPC_DPDynamicAttr_UpdateInterval);
+ }
+ 
+-static int test_DPC_DPDynamicAttr_DarkDefectThresh(VI_PIPE ViPipe)
++static int test_DPC_DPDynamicAttr_DarkDefectThresh_manual(VI_PIPE ViPipe)
+ {
+ 	CVI_S32 ret = CVI_SUCCESS;
+ 	ISP_DP_DYNAMIC_ATTR_S attr;
+@@ -210,14 +210,155 @@ static int test_DPC_DPDynamicAttr_DarkDefectThresh(VI_PIPE ViPipe)
+ 		return ret;
+ 	}
+ 	// check default value test
+-	CVI_U16 default_val[5] = { 710,1036,1711,2365,3905 };
+-	if (memcmp(default_val, attr.DarkDefectThresh, sizeof(CVI_U16) * 5) != 0) {
++	if (attr.stManual.DarkDefectThresh[0] != 710) {
++		TEST_FAIL("test default value: 710 != %d\n", (int)attr.stManual.DarkDefectThresh[0]);
++		return CVI_FAILURE;
++	}
++	if (attr.stManual.DarkDefectThresh[1] != 1036) {
++		TEST_FAIL("test default value: 1036 != %d\n", (int)attr.stManual.DarkDefectThresh[1]);
++		return CVI_FAILURE;
++	}
++	if (attr.stManual.DarkDefectThresh[2] != 1711) {
++		TEST_FAIL("test default value: 1711 != %d\n", (int)attr.stManual.DarkDefectThresh[2]);
++		return CVI_FAILURE;
++	}
++	if (attr.stManual.DarkDefectThresh[3] != 2365) {
++		TEST_FAIL("test default value: 2365 != %d\n", (int)attr.stManual.DarkDefectThresh[3]);
++		return CVI_FAILURE;
++	}
++	if (attr.stManual.DarkDefectThresh[4] != 3905) {
++		TEST_FAIL("test default value: 3905 != %d\n", (int)attr.stManual.DarkDefectThresh[4]);
++		return CVI_FAILURE;
++	}
++	// set minimum value
++	attr.stManual.DarkDefectThresh[0] = 0;
++	attr.stManual.DarkDefectThresh[1] = 0;
++	attr.stManual.DarkDefectThresh[2] = 0;
++	attr.stManual.DarkDefectThresh[3] = 0;
++	attr.stManual.DarkDefectThresh[4] = 0;
++	ret = CVI_ISP_SetDPDynamicAttr(ViPipe, &attr);
++	if (ret != CVI_SUCCESS) {
++		TEST_FAIL("test minimum value failed\n");
++		return ret;
++	}
++	ret = CVI_ISP_GetVDTimeOut(ViPipe, ISP_VD_BE_END, 200);
++	if (ret != CVI_SUCCESS) {
++		TEST_FAIL("test minimum value failed at VD wait\n");
++		return ret;
++	}
++	// set maximum value
++	attr.stManual.DarkDefectThresh[0] = 4095;
++	attr.stManual.DarkDefectThresh[1] = 4095;
++	attr.stManual.DarkDefectThresh[2] = 4095;
++	attr.stManual.DarkDefectThresh[3] = 4095;
++	attr.stManual.DarkDefectThresh[4] = 4095;
++	ret = CVI_ISP_SetDPDynamicAttr(ViPipe, &attr);
++	if (ret != CVI_SUCCESS) {
++		TEST_FAIL("test maximum value failed\n");
++		return ret;
++	}
++	ret = CVI_ISP_GetVDTimeOut(ViPipe, ISP_VD_BE_END, 200);
++	if (ret != CVI_SUCCESS) {
++		TEST_FAIL("test maximum value failed at VD wait\n");
++		return ret;
++	}
++	// set random value
++	attr.stManual.DarkDefectThresh[0] = rand_range(0, 4095);
++	attr.stManual.DarkDefectThresh[1] = rand_range(0, 4095);
++	attr.stManual.DarkDefectThresh[2] = rand_range(0, 4095);
++	attr.stManual.DarkDefectThresh[3] = rand_range(0, 4095);
++	attr.stManual.DarkDefectThresh[4] = rand_range(0, 4095);
++	ret = CVI_ISP_SetDPDynamicAttr(ViPipe, &attr);
++	if (ret != CVI_SUCCESS) {
++		TEST_FAIL("test random value failed\n");
++		return ret;
++	}
++	ret = CVI_ISP_GetVDTimeOut(ViPipe, ISP_VD_BE_END, 200);
++	if (ret != CVI_SUCCESS) {
++		TEST_FAIL("test random value failed at VD wait\n");
++		return ret;
++	}
++	// set abnormal value test
++	attr.stManual.DarkDefectThresh[0] = rand_range(4096, 65535);
++	attr.stManual.DarkDefectThresh[1] = rand_range(4096, 65535);
++	attr.stManual.DarkDefectThresh[2] = rand_range(4096, 65535);
++	attr.stManual.DarkDefectThresh[3] = rand_range(4096, 65535);
++	attr.stManual.DarkDefectThresh[4] = rand_range(4096, 65535);
++	ret = CVI_ISP_SetDPDynamicAttr(ViPipe, &attr);
++	if (ret == CVI_SUCCESS) {
++		TEST_FAIL("test abnormal value should fail\n");
++		return CVI_FAILURE;
++	}
++	// restore default value
++	attr.stManual.DarkDefectThresh[0] = 710;
++	attr.stManual.DarkDefectThresh[1] = 1036;
++	attr.stManual.DarkDefectThresh[2] = 1711;
++	attr.stManual.DarkDefectThresh[3] = 2365;
++	attr.stManual.DarkDefectThresh[4] = 3905;
++	ret = CVI_ISP_SetDPDynamicAttr(ViPipe, &attr);
++	if (ret != CVI_SUCCESS) {
++		TEST_FAIL("restore default value failed\n");
++		return ret;
++	}
++	return CVI_SUCCESS;
++}
++
++static void __attribute__((constructor)) reg_test_DPC_DPDynamicAttr_DarkDefectThresh_manual(void)
++{
++	reg_api_test_fn(test_DPC_DPDynamicAttr_DarkDefectThresh_manual);
++}
++
++static int test_DPC_DPDynamicAttr_DarkDefectThresh_auto(VI_PIPE ViPipe)
++{
++	CVI_S32 ret = CVI_SUCCESS;
++	ISP_DP_DYNAMIC_ATTR_S attr;
++
++	ret = CVI_ISP_GetDPDynamicAttr(ViPipe, &attr);
++	if (ret != CVI_SUCCESS) {
++		TEST_FAIL("CVI_ISP_GetDPDynamicAttr failed\n");
++		return ret;
++	}
++	// check default value test
++	CVI_U16 default_val_0[ISP_AUTO_ISO_STRENGTH_NUM] = { 710,710,710,710,710,710,710,710,710,710,710,710,710,710,710,710 };
++	if (memcmp(default_val_0, attr.stAuto.DarkDefectThresh[0], sizeof(CVI_U16) * ISP_AUTO_ISO_STRENGTH_NUM) != 0) {
++		TEST_FAIL("test default value failed\n");
++		return CVI_FAILURE;
++	}
++	CVI_U16 default_val_1[ISP_AUTO_ISO_STRENGTH_NUM] = { 1036,1036,1036,1036,1036,1036,1036,1036,1036,1036,1036,1036,1036,1036,1036,1036 };
++	if (memcmp(default_val_1, attr.stAuto.DarkDefectThresh[1], sizeof(CVI_U16) * ISP_AUTO_ISO_STRENGTH_NUM) != 0) {
++		TEST_FAIL("test default value failed\n");
++		return CVI_FAILURE;
++	}
++	CVI_U16 default_val_2[ISP_AUTO_ISO_STRENGTH_NUM] = { 1711,1711,1711,1711,1711,1711,1711,1711,1711,1711,1711,1711,1711,1711,1711,1711 };
++	if (memcmp(default_val_2, attr.stAuto.DarkDefectThresh[2], sizeof(CVI_U16) * ISP_AUTO_ISO_STRENGTH_NUM) != 0) {
++		TEST_FAIL("test default value failed\n");
++		return CVI_FAILURE;
++	}
++	CVI_U16 default_val_3[ISP_AUTO_ISO_STRENGTH_NUM] = { 2365,2365,2365,2365,2365,2365,2365,2365,2365,2365,2365,2365,2365,2365,2365,2365 };
++	if (memcmp(default_val_3, attr.stAuto.DarkDefectThresh[3], sizeof(CVI_U16) * ISP_AUTO_ISO_STRENGTH_NUM) != 0) {
++		TEST_FAIL("test default value failed\n");
++		return CVI_FAILURE;
++	}
++	CVI_U16 default_val_4[ISP_AUTO_ISO_STRENGTH_NUM] = { 3905,3905,3905,3905,3905,3905,3905,3905,3905,3905,3905,3905,3905,3905,3905,3905 };
++	if (memcmp(default_val_4, attr.stAuto.DarkDefectThresh[4], sizeof(CVI_U16) * ISP_AUTO_ISO_STRENGTH_NUM) != 0) {
+ 		TEST_FAIL("test default value failed\n");
+ 		return CVI_FAILURE;
+ 	}
+ 	// set minimum value
+-	for (int i = 0; i < 5; ++i) {
+-		attr.DarkDefectThresh[i] = 0;
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.DarkDefectThresh[0][j] = 0;
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.DarkDefectThresh[1][j] = 0;
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.DarkDefectThresh[2][j] = 0;
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.DarkDefectThresh[3][j] = 0;
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.DarkDefectThresh[4][j] = 0;
+ 	}
+ 	ret = CVI_ISP_SetDPDynamicAttr(ViPipe, &attr);
+ 	if (ret != CVI_SUCCESS) {
+@@ -230,8 +371,20 @@ static int test_DPC_DPDynamicAttr_DarkDefectThresh(VI_PIPE ViPipe)
+ 		return ret;
+ 	}
+ 	// set maximum value
+-	for (int i = 0; i < 5; ++i) {
+-		attr.DarkDefectThresh[i] = 4095;
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.DarkDefectThresh[0][j] = 4095;
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.DarkDefectThresh[1][j] = 4095;
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.DarkDefectThresh[2][j] = 4095;
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.DarkDefectThresh[3][j] = 4095;
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.DarkDefectThresh[4][j] = 4095;
+ 	}
+ 	ret = CVI_ISP_SetDPDynamicAttr(ViPipe, &attr);
+ 	if (ret != CVI_SUCCESS) {
+@@ -244,8 +397,20 @@ static int test_DPC_DPDynamicAttr_DarkDefectThresh(VI_PIPE ViPipe)
+ 		return ret;
+ 	}
+ 	// set random value
+-	for (int i = 0; i < 5; i++) {
+-		attr.DarkDefectThresh[i] = rand_range(0, 4095);
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.DarkDefectThresh[0][j] = rand_range(0, 4095);
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.DarkDefectThresh[1][j] = rand_range(0, 4095);
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.DarkDefectThresh[2][j] = rand_range(0, 4095);
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.DarkDefectThresh[3][j] = rand_range(0, 4095);
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.DarkDefectThresh[4][j] = rand_range(0, 4095);
+ 	}
+ 	ret = CVI_ISP_SetDPDynamicAttr(ViPipe, &attr);
+ 	if (ret != CVI_SUCCESS) {
+@@ -258,8 +423,20 @@ static int test_DPC_DPDynamicAttr_DarkDefectThresh(VI_PIPE ViPipe)
+ 		return ret;
+ 	}
+ 	// set abnormal value test
+-	for (int i = 0; i < 5; i++) {
+-		attr.DarkDefectThresh[i] = rand_range(4096, 65535);
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.DarkDefectThresh[0][j] = rand_range(4096, 65535);
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.DarkDefectThresh[1][j] = rand_range(4096, 65535);
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.DarkDefectThresh[2][j] = rand_range(4096, 65535);
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.DarkDefectThresh[3][j] = rand_range(4096, 65535);
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.DarkDefectThresh[4][j] = rand_range(4096, 65535);
+ 	}
+ 	ret = CVI_ISP_SetDPDynamicAttr(ViPipe, &attr);
+ 	if (ret == CVI_SUCCESS) {
+@@ -267,7 +444,16 @@ static int test_DPC_DPDynamicAttr_DarkDefectThresh(VI_PIPE ViPipe)
+ 		return CVI_FAILURE;
+ 	}
+ 	// restore default value
+-	memcpy(attr.DarkDefectThresh, default_val, sizeof(CVI_U16) * 5);
++	CVI_U16 restore_val_0[ISP_AUTO_ISO_STRENGTH_NUM] = { 710,710,710,710,710,710,710,710,710,710,710,710,710,710,710,710 };
++	memcpy(attr.stAuto.DarkDefectThresh[0], restore_val_0, sizeof(CVI_U16) * ISP_AUTO_ISO_STRENGTH_NUM);
++	CVI_U16 restore_val_1[ISP_AUTO_ISO_STRENGTH_NUM] = { 1036,1036,1036,1036,1036,1036,1036,1036,1036,1036,1036,1036,1036,1036,1036,1036 };
++	memcpy(attr.stAuto.DarkDefectThresh[1], restore_val_1, sizeof(CVI_U16) * ISP_AUTO_ISO_STRENGTH_NUM);
++	CVI_U16 restore_val_2[ISP_AUTO_ISO_STRENGTH_NUM] = { 1711,1711,1711,1711,1711,1711,1711,1711,1711,1711,1711,1711,1711,1711,1711,1711 };
++	memcpy(attr.stAuto.DarkDefectThresh[2], restore_val_2, sizeof(CVI_U16) * ISP_AUTO_ISO_STRENGTH_NUM);
++	CVI_U16 restore_val_3[ISP_AUTO_ISO_STRENGTH_NUM] = { 2365,2365,2365,2365,2365,2365,2365,2365,2365,2365,2365,2365,2365,2365,2365,2365 };
++	memcpy(attr.stAuto.DarkDefectThresh[3], restore_val_3, sizeof(CVI_U16) * ISP_AUTO_ISO_STRENGTH_NUM);
++	CVI_U16 restore_val_4[ISP_AUTO_ISO_STRENGTH_NUM] = { 3905,3905,3905,3905,3905,3905,3905,3905,3905,3905,3905,3905,3905,3905,3905,3905 };
++	memcpy(attr.stAuto.DarkDefectThresh[4], restore_val_4, sizeof(CVI_U16) * ISP_AUTO_ISO_STRENGTH_NUM);
+ 	ret = CVI_ISP_SetDPDynamicAttr(ViPipe, &attr);
+ 	if (ret != CVI_SUCCESS) {
+ 		TEST_FAIL("restore default value failed\n");
+@@ -276,12 +462,12 @@ static int test_DPC_DPDynamicAttr_DarkDefectThresh(VI_PIPE ViPipe)
+ 	return CVI_SUCCESS;
+ }
+ 
+-static void __attribute__((constructor)) reg_test_DPC_DPDynamicAttr_DarkDefectThresh(void)
++static void __attribute__((constructor)) reg_test_DPC_DPDynamicAttr_DarkDefectThresh_auto(void)
+ {
+-	reg_api_test_fn(test_DPC_DPDynamicAttr_DarkDefectThresh);
++	reg_api_test_fn(test_DPC_DPDynamicAttr_DarkDefectThresh_auto);
+ }
+ 
+-static int test_DPC_DPDynamicAttr_BrightDefectThresh(VI_PIPE ViPipe)
++static int test_DPC_DPDynamicAttr_BrightDefectThresh_manual(VI_PIPE ViPipe)
+ {
+ 	CVI_S32 ret = CVI_SUCCESS;
+ 	ISP_DP_DYNAMIC_ATTR_S attr;
+@@ -292,14 +478,155 @@ static int test_DPC_DPDynamicAttr_BrightDefectThresh(VI_PIPE ViPipe)
+ 		return ret;
+ 	}
+ 	// check default value test
+-	CVI_U16 default_val[5] = { 710,1036,1711,2365,3905 };
+-	if (memcmp(default_val, attr.BrightDefectThresh, sizeof(CVI_U16) * 5) != 0) {
++	if (attr.stManual.BrightDefectThresh[0] != 710) {
++		TEST_FAIL("test default value: 710 != %d\n", (int)attr.stManual.BrightDefectThresh[0]);
++		return CVI_FAILURE;
++	}
++	if (attr.stManual.BrightDefectThresh[1] != 1036) {
++		TEST_FAIL("test default value: 1036 != %d\n", (int)attr.stManual.BrightDefectThresh[1]);
++		return CVI_FAILURE;
++	}
++	if (attr.stManual.BrightDefectThresh[2] != 1711) {
++		TEST_FAIL("test default value: 1711 != %d\n", (int)attr.stManual.BrightDefectThresh[2]);
++		return CVI_FAILURE;
++	}
++	if (attr.stManual.BrightDefectThresh[3] != 2365) {
++		TEST_FAIL("test default value: 2365 != %d\n", (int)attr.stManual.BrightDefectThresh[3]);
++		return CVI_FAILURE;
++	}
++	if (attr.stManual.BrightDefectThresh[4] != 3905) {
++		TEST_FAIL("test default value: 3905 != %d\n", (int)attr.stManual.BrightDefectThresh[4]);
++		return CVI_FAILURE;
++	}
++	// set minimum value
++	attr.stManual.BrightDefectThresh[0] = 0;
++	attr.stManual.BrightDefectThresh[1] = 0;
++	attr.stManual.BrightDefectThresh[2] = 0;
++	attr.stManual.BrightDefectThresh[3] = 0;
++	attr.stManual.BrightDefectThresh[4] = 0;
++	ret = CVI_ISP_SetDPDynamicAttr(ViPipe, &attr);
++	if (ret != CVI_SUCCESS) {
++		TEST_FAIL("test minimum value failed\n");
++		return ret;
++	}
++	ret = CVI_ISP_GetVDTimeOut(ViPipe, ISP_VD_BE_END, 200);
++	if (ret != CVI_SUCCESS) {
++		TEST_FAIL("test minimum value failed at VD wait\n");
++		return ret;
++	}
++	// set maximum value
++	attr.stManual.BrightDefectThresh[0] = 4095;
++	attr.stManual.BrightDefectThresh[1] = 4095;
++	attr.stManual.BrightDefectThresh[2] = 4095;
++	attr.stManual.BrightDefectThresh[3] = 4095;
++	attr.stManual.BrightDefectThresh[4] = 4095;
++	ret = CVI_ISP_SetDPDynamicAttr(ViPipe, &attr);
++	if (ret != CVI_SUCCESS) {
++		TEST_FAIL("test maximum value failed\n");
++		return ret;
++	}
++	ret = CVI_ISP_GetVDTimeOut(ViPipe, ISP_VD_BE_END, 200);
++	if (ret != CVI_SUCCESS) {
++		TEST_FAIL("test maximum value failed at VD wait\n");
++		return ret;
++	}
++	// set random value
++	attr.stManual.BrightDefectThresh[0] = rand_range(0, 4095);
++	attr.stManual.BrightDefectThresh[1] = rand_range(0, 4095);
++	attr.stManual.BrightDefectThresh[2] = rand_range(0, 4095);
++	attr.stManual.BrightDefectThresh[3] = rand_range(0, 4095);
++	attr.stManual.BrightDefectThresh[4] = rand_range(0, 4095);
++	ret = CVI_ISP_SetDPDynamicAttr(ViPipe, &attr);
++	if (ret != CVI_SUCCESS) {
++		TEST_FAIL("test random value failed\n");
++		return ret;
++	}
++	ret = CVI_ISP_GetVDTimeOut(ViPipe, ISP_VD_BE_END, 200);
++	if (ret != CVI_SUCCESS) {
++		TEST_FAIL("test random value failed at VD wait\n");
++		return ret;
++	}
++	// set abnormal value test
++	attr.stManual.BrightDefectThresh[0] = rand_range(4096, 65535);
++	attr.stManual.BrightDefectThresh[1] = rand_range(4096, 65535);
++	attr.stManual.BrightDefectThresh[2] = rand_range(4096, 65535);
++	attr.stManual.BrightDefectThresh[3] = rand_range(4096, 65535);
++	attr.stManual.BrightDefectThresh[4] = rand_range(4096, 65535);
++	ret = CVI_ISP_SetDPDynamicAttr(ViPipe, &attr);
++	if (ret == CVI_SUCCESS) {
++		TEST_FAIL("test abnormal value should fail\n");
++		return CVI_FAILURE;
++	}
++	// restore default value
++	attr.stManual.BrightDefectThresh[0] = 710;
++	attr.stManual.BrightDefectThresh[1] = 1036;
++	attr.stManual.BrightDefectThresh[2] = 1711;
++	attr.stManual.BrightDefectThresh[3] = 2365;
++	attr.stManual.BrightDefectThresh[4] = 3905;
++	ret = CVI_ISP_SetDPDynamicAttr(ViPipe, &attr);
++	if (ret != CVI_SUCCESS) {
++		TEST_FAIL("restore default value failed\n");
++		return ret;
++	}
++	return CVI_SUCCESS;
++}
++
++static void __attribute__((constructor)) reg_test_DPC_DPDynamicAttr_BrightDefectThresh_manual(void)
++{
++	reg_api_test_fn(test_DPC_DPDynamicAttr_BrightDefectThresh_manual);
++}
++
++static int test_DPC_DPDynamicAttr_BrightDefectThresh_auto(VI_PIPE ViPipe)
++{
++	CVI_S32 ret = CVI_SUCCESS;
++	ISP_DP_DYNAMIC_ATTR_S attr;
++
++	ret = CVI_ISP_GetDPDynamicAttr(ViPipe, &attr);
++	if (ret != CVI_SUCCESS) {
++		TEST_FAIL("CVI_ISP_GetDPDynamicAttr failed\n");
++		return ret;
++	}
++	// check default value test
++	CVI_U16 default_val_0[ISP_AUTO_ISO_STRENGTH_NUM] = { 710,710,710,710,710,710,710,710,710,710,710,710,710,710,710,710 };
++	if (memcmp(default_val_0, attr.stAuto.BrightDefectThresh[0], sizeof(CVI_U16) * ISP_AUTO_ISO_STRENGTH_NUM) != 0) {
++		TEST_FAIL("test default value failed\n");
++		return CVI_FAILURE;
++	}
++	CVI_U16 default_val_1[ISP_AUTO_ISO_STRENGTH_NUM] = { 1036,1036,1036,1036,1036,1036,1036,1036,1036,1036,1036,1036,1036,1036,1036,1036 };
++	if (memcmp(default_val_1, attr.stAuto.BrightDefectThresh[1], sizeof(CVI_U16) * ISP_AUTO_ISO_STRENGTH_NUM) != 0) {
++		TEST_FAIL("test default value failed\n");
++		return CVI_FAILURE;
++	}
++	CVI_U16 default_val_2[ISP_AUTO_ISO_STRENGTH_NUM] = { 1711,1711,1711,1711,1711,1711,1711,1711,1711,1711,1711,1711,1711,1711,1711,1711 };
++	if (memcmp(default_val_2, attr.stAuto.BrightDefectThresh[2], sizeof(CVI_U16) * ISP_AUTO_ISO_STRENGTH_NUM) != 0) {
++		TEST_FAIL("test default value failed\n");
++		return CVI_FAILURE;
++	}
++	CVI_U16 default_val_3[ISP_AUTO_ISO_STRENGTH_NUM] = { 2365,2365,2365,2365,2365,2365,2365,2365,2365,2365,2365,2365,2365,2365,2365,2365 };
++	if (memcmp(default_val_3, attr.stAuto.BrightDefectThresh[3], sizeof(CVI_U16) * ISP_AUTO_ISO_STRENGTH_NUM) != 0) {
++		TEST_FAIL("test default value failed\n");
++		return CVI_FAILURE;
++	}
++	CVI_U16 default_val_4[ISP_AUTO_ISO_STRENGTH_NUM] = { 3905,3905,3905,3905,3905,3905,3905,3905,3905,3905,3905,3905,3905,3905,3905,3905 };
++	if (memcmp(default_val_4, attr.stAuto.BrightDefectThresh[4], sizeof(CVI_U16) * ISP_AUTO_ISO_STRENGTH_NUM) != 0) {
+ 		TEST_FAIL("test default value failed\n");
+ 		return CVI_FAILURE;
+ 	}
+ 	// set minimum value
+-	for (int i = 0; i < 5; ++i) {
+-		attr.BrightDefectThresh[i] = 0;
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.BrightDefectThresh[0][j] = 0;
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.BrightDefectThresh[1][j] = 0;
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.BrightDefectThresh[2][j] = 0;
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.BrightDefectThresh[3][j] = 0;
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.BrightDefectThresh[4][j] = 0;
+ 	}
+ 	ret = CVI_ISP_SetDPDynamicAttr(ViPipe, &attr);
+ 	if (ret != CVI_SUCCESS) {
+@@ -312,8 +639,20 @@ static int test_DPC_DPDynamicAttr_BrightDefectThresh(VI_PIPE ViPipe)
+ 		return ret;
+ 	}
+ 	// set maximum value
+-	for (int i = 0; i < 5; ++i) {
+-		attr.BrightDefectThresh[i] = 4095;
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.BrightDefectThresh[0][j] = 4095;
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.BrightDefectThresh[1][j] = 4095;
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.BrightDefectThresh[2][j] = 4095;
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.BrightDefectThresh[3][j] = 4095;
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.BrightDefectThresh[4][j] = 4095;
+ 	}
+ 	ret = CVI_ISP_SetDPDynamicAttr(ViPipe, &attr);
+ 	if (ret != CVI_SUCCESS) {
+@@ -326,8 +665,20 @@ static int test_DPC_DPDynamicAttr_BrightDefectThresh(VI_PIPE ViPipe)
+ 		return ret;
+ 	}
+ 	// set random value
+-	for (int i = 0; i < 5; i++) {
+-		attr.BrightDefectThresh[i] = rand_range(0, 4095);
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.BrightDefectThresh[0][j] = rand_range(0, 4095);
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.BrightDefectThresh[1][j] = rand_range(0, 4095);
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.BrightDefectThresh[2][j] = rand_range(0, 4095);
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.BrightDefectThresh[3][j] = rand_range(0, 4095);
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.BrightDefectThresh[4][j] = rand_range(0, 4095);
+ 	}
+ 	ret = CVI_ISP_SetDPDynamicAttr(ViPipe, &attr);
+ 	if (ret != CVI_SUCCESS) {
+@@ -340,8 +691,20 @@ static int test_DPC_DPDynamicAttr_BrightDefectThresh(VI_PIPE ViPipe)
+ 		return ret;
+ 	}
+ 	// set abnormal value test
+-	for (int i = 0; i < 5; i++) {
+-		attr.BrightDefectThresh[i] = rand_range(4096, 65535);
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.BrightDefectThresh[0][j] = rand_range(4096, 65535);
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.BrightDefectThresh[1][j] = rand_range(4096, 65535);
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.BrightDefectThresh[2][j] = rand_range(4096, 65535);
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.BrightDefectThresh[3][j] = rand_range(4096, 65535);
++	}
++	for (int j = 0; j < ISP_AUTO_ISO_STRENGTH_NUM; ++j) {
++		attr.stAuto.BrightDefectThresh[4][j] = rand_range(4096, 65535);
+ 	}
+ 	ret = CVI_ISP_SetDPDynamicAttr(ViPipe, &attr);
+ 	if (ret == CVI_SUCCESS) {
+@@ -349,7 +712,16 @@ static int test_DPC_DPDynamicAttr_BrightDefectThresh(VI_PIPE ViPipe)
+ 		return CVI_FAILURE;
+ 	}
+ 	// restore default value
+-	memcpy(attr.BrightDefectThresh, default_val, sizeof(CVI_U16) * 5);
++	CVI_U16 restore_val_0[ISP_AUTO_ISO_STRENGTH_NUM] = { 710,710,710,710,710,710,710,710,710,710,710,710,710,710,710,710 };
++	memcpy(attr.stAuto.BrightDefectThresh[0], restore_val_0, sizeof(CVI_U16) * ISP_AUTO_ISO_STRENGTH_NUM);
++	CVI_U16 restore_val_1[ISP_AUTO_ISO_STRENGTH_NUM] = { 1036,1036,1036,1036,1036,1036,1036,1036,1036,1036,1036,1036,1036,1036,1036,1036 };
++	memcpy(attr.stAuto.BrightDefectThresh[1], restore_val_1, sizeof(CVI_U16) * ISP_AUTO_ISO_STRENGTH_NUM);
++	CVI_U16 restore_val_2[ISP_AUTO_ISO_STRENGTH_NUM] = { 1711,1711,1711,1711,1711,1711,1711,1711,1711,1711,1711,1711,1711,1711,1711,1711 };
++	memcpy(attr.stAuto.BrightDefectThresh[2], restore_val_2, sizeof(CVI_U16) * ISP_AUTO_ISO_STRENGTH_NUM);
++	CVI_U16 restore_val_3[ISP_AUTO_ISO_STRENGTH_NUM] = { 2365,2365,2365,2365,2365,2365,2365,2365,2365,2365,2365,2365,2365,2365,2365,2365 };
++	memcpy(attr.stAuto.BrightDefectThresh[3], restore_val_3, sizeof(CVI_U16) * ISP_AUTO_ISO_STRENGTH_NUM);
++	CVI_U16 restore_val_4[ISP_AUTO_ISO_STRENGTH_NUM] = { 3905,3905,3905,3905,3905,3905,3905,3905,3905,3905,3905,3905,3905,3905,3905,3905 };
++	memcpy(attr.stAuto.BrightDefectThresh[4], restore_val_4, sizeof(CVI_U16) * ISP_AUTO_ISO_STRENGTH_NUM);
+ 	ret = CVI_ISP_SetDPDynamicAttr(ViPipe, &attr);
+ 	if (ret != CVI_SUCCESS) {
+ 		TEST_FAIL("restore default value failed\n");
+@@ -358,9 +730,9 @@ static int test_DPC_DPDynamicAttr_BrightDefectThresh(VI_PIPE ViPipe)
+ 	return CVI_SUCCESS;
+ }
+ 
+-static void __attribute__((constructor)) reg_test_DPC_DPDynamicAttr_BrightDefectThresh(void)
++static void __attribute__((constructor)) reg_test_DPC_DPDynamicAttr_BrightDefectThresh_auto(void)
+ {
+-	reg_api_test_fn(test_DPC_DPDynamicAttr_BrightDefectThresh);
++	reg_api_test_fn(test_DPC_DPDynamicAttr_BrightDefectThresh_auto);
+ }
+ 
+ static int test_DPC_DPDynamicAttr_DarkDefectThreshOffset(VI_PIPE ViPipe)
+-- 
+2.25.1
+
