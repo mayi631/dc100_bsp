@@ -1,0 +1,54 @@
+From a36f5cf1c7f815693ef7b55800cef78831cebe41 Mon Sep 17 00:00:00 2001
+From: "yicong.wu" <46077464+zisen123@users.noreply.github.com>
+Date: Mon, 28 Sep 2026 14:56:04 +0800
+Subject: [PATCH] fix(cvi_bin): update DPC DefectThresh profile to byISO layout
+
+168779 changed DPC Dark/BrightDefectThresh from top-level arrays to
+stManual[5]/stAuto[5][16]. cvi_bin_profile.json must carry the nested
+layout (8 entries: stManual dims[5], stAuto dims[5][16]) so the autogen
+cvi_bin parser serializes/deserializes the byISO pqbin correctly;
+otherwise new libisp + new bin misparse DPC params and ISP init asserts
+(black screen on entering AI night-vision photo mode).
+
+Change-Id: I738803a6c84cb3e29f866daafc22faf4f6b04283
+---
+ modules/cvi_bin/python/cvi_bin_profile.json | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/modules/cvi_bin/python/cvi_bin_profile.json b/modules/cvi_bin/python/cvi_bin_profile.json
+index cf2e241..365b02a 100644
+--- a/modules/cvi_bin/python/cvi_bin_profile.json
++++ b/modules/cvi_bin/python/cvi_bin_profile.json
+@@ -210,6 +210,14 @@
+                     {
+                         "ID": 3,
+                         "type":["unsigned", "char"], "name":"AvgMode", "dims":[], "children": []
++                    },
++                    {
++                        "ID": 4,
++                        "type":["unsigned", "short"], "name":"DarkDefectThresh", "dims":["5"], "children": []
++                    },
++                    {
++                        "ID": 5,
++                        "type":["unsigned", "short"], "name":"BrightDefectThresh", "dims":["5"], "children": []
+                     }
+                 ]
+             },
+@@ -231,6 +239,14 @@
+                     {
+                         "ID": 3,
+                         "type":["unsigned", "char"], "name":"AvgMode", "dims":["16"], "children": []
++                    },
++                    {
++                        "ID": 4,
++                        "type":["unsigned", "short"], "name":"DarkDefectThresh", "dims":["5", "16"], "children": []
++                    },
++                    {
++                        "ID": 5,
++                        "type":["unsigned", "short"], "name":"BrightDefectThresh", "dims":["5", "16"], "children": []
+                     }
+                 ]
+             }
+-- 
+2.25.1
+
