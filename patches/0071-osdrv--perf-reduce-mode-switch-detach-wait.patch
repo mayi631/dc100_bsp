@@ -1,0 +1,516 @@
+From 12dafd2c244bbdd1b0630f05969526fc6c22b23b Mon Sep 17 00:00:00 2001
+From: "yicong.wu" <46077464+zisen123@users.noreply.github.com>
+Date: Tue, 13 Oct 2026 09:57:42 +0800
+Subject: [PATCH] perf(rgn): cut mode-switch OSD detach wait from 200ms/region
+ to ~10ms
+
+Mode switch (StopOsd) detaches 2~4 OSD regions serially and each
+rgn_detach_from_chn slept a flat 200ms (ef7eb892 VPSS-off UAF
+workaround), costing 800ms per movie close. Three changes:
+
+1. Probe VPSS before the wait (backport of b33772c5): only
+   ERR_VPSS_UNEXIST counts as "VPSS gone" - a bare -1 may mean
+   "handle not in the vpss rgn table" while the GOP still scans the
+   canvas (CV184XSDK-1326), so it keeps the conservative wait. Close
+   paths that destroy the VPSS grp before OSD detach (media_dump
+   VIISPReset) skip the wait entirely.
+
+2. Replace the flat 200ms with a deterministic one-frame-period wait:
+   REMOVE already drops the rgn from the next job's VPSS config, then
+   the CLR (with the OW instance freshly probed in the same detach -
+   the attach-time copy may be stale) zeroes the GOP OW address
+   register, leaving one frame period (4K25 = 40ms,
+   RGN_DETACH_WAIT_MS = 50, tree configs are 25/60fps) of in-flight
+   access before the canvas ION free.
+
+3. Defer that free to a reaper timer: a mode-switch burst of 2~4
+   detaches shares ONE 60ms wait window instead of N serial 50ms
+   sleeps. Canvases are queued into a static 16-slot table and freed
+   by an osal_timer reaper; full table or dead reaper degrades to the
+   inline wait+free, and the VPSS-dead probe path frees immediately.
+   Rhino drops TIMER_CMD_CHG/DYN_DEL on an ACTIVE timer, so the
+   reaper rearm is stop -> mod -> start and _rgn_exit stops the timer
+   before destroy_sync, then flushes the table under g_rgnlock.
+
+Verified on dc100_debug (4K config, 100+ mode switches, recordings
+and photo bursts, zero deadlock / leak / fallback):
+- detach per region: 199~202ms -> 5~12ms
+- StopOsd: movie 800ms -> ~35ms, photo 410ms -> ~13ms
+- switch total: movie->photo 1080ms -> ~300ms (wiki level),
+  photo->movie 820ms -> ~380ms
+- reaper reclaims at 57~77ms, queued == freed (no leak)
+
+Change-Id: I088020a5be0f5a67043c6e129f68d34f1cf167b1
+---
+ interdrv/rgn/driver/rgn.c        | 235 +++++++++++++++++++++++++++----
+ interdrv/vpss/driver/vpss_core.c |  68 +++++++++
+ 2 files changed, 279 insertions(+), 24 deletions(-)
+
+diff --git a/interdrv/rgn/driver/rgn.c b/interdrv/rgn/driver/rgn.c
+index 67cea793..12abd480 100644
+--- a/interdrv/rgn/driver/rgn.c
++++ b/interdrv/rgn/driver/rgn.c
+@@ -52,6 +52,98 @@ static unsigned int rgn_num;
+ static osal_mutex hdlslock, g_rgnlock, g_rgnhashlock;
+ static osal_hash *rgn_hash;
+ 
++/* Deferred canvas free (plan D): after the REMOVE + OW-addr CLR the hardware
++ * stops referencing the canvas within one frame period (4K25 = 40ms), so the
++ * ION free is postponed ~60ms to a reaper timer instead of sleeping inline in
++ * every detach. A mode switch bursts 2~4 detaches back-to-back (<2ms apart)
++ * and shares ONE wait window, cutting StopOsd from N*50ms to ~N*1ms.
++ * Caller must hold g_rgnlock when queueing; reaper also takes g_rgnlock. */
++#define RGN_DEFER_FREE_DELAY_MS 60
++#define RGN_DEFER_FREE_SLOTS    16
++/* Inline fallback wait (slots full / reaper dead): one frame period at
++ * >=20fps. Tree video configs are 25/60fps; a low-fps or long-exposure
++ * mode would need a longer bound. */
++#define RGN_DETACH_WAIT_MS      50
++
++struct rgn_defer_free_node {
++	uint64_t phy_addr;
++	unsigned long deadline_ms;
++	bool used;
++};
++
++static struct rgn_defer_free_node g_rgn_defer[RGN_DEFER_FREE_SLOTS];
++static osal_timer g_rgn_reaper;
++
++static unsigned long _rgn_now_ms(void)
++{
++	osal_timeval tv;
++
++	osal_gettimeofday(&tv);
++	return tv.tv_sec * 1000UL + tv.tv_usec / 1000UL;
++}
++
++/* Queue one canvas for deferred free. Returns 0 on success, -1 when the
++ * reaper is dead (init failed / module exiting) or the slot table is full;
++ * the caller then degrades to the inline wait+free. */
++static int _rgn_defer_queue(rgn_handle handle, uint64_t phy_addr)
++{
++	int i;
++
++	if (g_rgn_reaper.timer == NULL)
++		return -1;
++
++	for (i = 0; i < RGN_DEFER_FREE_SLOTS; ++i) {
++		if (!g_rgn_defer[i].used) {
++			g_rgn_defer[i].used = true;
++			g_rgn_defer[i].phy_addr = phy_addr;
++			g_rgn_defer[i].deadline_ms = _rgn_now_ms() + RGN_DEFER_FREE_DELAY_MS;
++			TRACE_RGN(RGN_ERR, "defer free hdl=%d addr=0x%llx due=%ums\n",
++				handle, (unsigned long long)phy_addr, RGN_DEFER_FREE_DELAY_MS);
++			/* Rhino's krhino_timer_change drops TIMER_CMD_CHG while the
++			 * timer is ACTIVE, so a bare mod() on a running timer is a
++			 * silent no-op: stop -> mod -> start is required. */
++			osal_timer_stop(&g_rgn_reaper);
++			osal_timer_mod(&g_rgn_reaper, RGN_DEFER_FREE_DELAY_MS);
++			osal_timer_start(&g_rgn_reaper);
++			return 0;
++		}
++	}
++	return -1;
++}
++
++/* Runs in the alios timer task context (same as the vpss stats timer).
++ * Frees expired canvases, rearms to the earliest remaining deadline, and
++ * parks itself (stopped) when the table is empty - the next queue call
++ * restarts it. */
++static void _rgn_reaper_cb(unsigned long data)
++{
++	unsigned long now_ms = _rgn_now_ms();
++	unsigned long next_ms = 0;
++	int i, freed = 0;
++
++	osal_mutex_lock(&g_rgnlock);
++	for (i = 0; i < RGN_DEFER_FREE_SLOTS; ++i) {
++		if (!g_rgn_defer[i].used)
++			continue;
++		if ((long)(g_rgn_defer[i].deadline_ms - now_ms) <= 0) {
++			g_rgn_defer[i].used = false;
++			base_ion_free(g_rgn_defer[i].phy_addr);
++			++freed;
++		} else if (next_ms == 0 ||
++			   g_rgn_defer[i].deadline_ms - now_ms < next_ms) {
++			next_ms = g_rgn_defer[i].deadline_ms - now_ms;
++		}
++	}
++	if (freed)
++		TRACE_RGN(RGN_ERR, "reaper freed %d canvas\n", freed);
++	/* stop -> (mod) -> start: a bare mod() is a no-op on an ACTIVE timer */
++	osal_timer_stop(&g_rgn_reaper);
++	if (next_ms)
++		osal_timer_mod(&g_rgn_reaper, next_ms);
++	osal_timer_start(&g_rgn_reaper);
++	osal_mutex_unlock(&g_rgnlock);
++}
++
+ /*******************************************************
+  *  Internal APIs
+  ******************************************************/
+@@ -108,6 +200,16 @@ static int _rgn_call_cb(unsigned int m_id, unsigned int cmd_id, void *data)
+ 	return base_exe_module_cb(&exe_cb);
+ }
+ 
++/* Detect that the VPSS side is already destroyed (mode switch close order: VideoDeInit before StopOsd),
++ * in this case detach can skip the 200ms VPSS wait and clean up locally. (backport b33772c5)
++ * Only ERR_VPSS_UNEXIST means the grp is really gone. A bare -1 may also mean
++ * "handle not in the vpss rgn table" while the GOP is still scanning the canvas
++ * (CV184XSDK-1326), so treat it as VPSS-alive and keep the conservative wait. */
++static bool _rgn_cb_is_vpss_unavailable(int ret)
++{
++	return (ret == ERR_VPSS_UNEXIST);
++}
++
+ int32_t _rgn_init(void)
+ {
+ 	rgn_hash = osal_hash_create(64);
+@@ -116,10 +218,17 @@ int32_t _rgn_init(void)
+ 	}
+ 
+ 	osal_memset(rgn_prc_ctx, 0, sizeof(rgn_prc_ctx));
++	osal_memset(g_rgn_defer, 0, sizeof(g_rgn_defer));
+ 	rgn_num = 0;
+ 	osal_mutex_init(&hdlslock);
+ 	osal_mutex_init(&g_rgnlock);
+ 	osal_mutex_init(&g_rgnhashlock);
++	g_rgn_reaper.handler = _rgn_reaper_cb;
++	g_rgn_reaper.data = 0;
++	g_rgn_reaper.interval = RGN_DEFER_FREE_DELAY_MS;
++	/* create only; the reaper is started on the first deferred queue and
++	 * parks itself whenever the pending table runs empty */
++	osal_timer_init(&g_rgn_reaper);
+ 	TRACE_RGN(RGN_INFO, "-\n");
+ 	return 0;
+ }
+@@ -136,12 +245,33 @@ static int _hash_cb_rgn_destory(long long unsigned int key, void *value, void *c
+ 
+ int32_t _rgn_exit(void)
+ {
++	int i;
++
+ 	osal_mutex_lock(&g_rgnhashlock);
+ 	osal_hash_for_each_safe(rgn_hash, _hash_cb_rgn_destory, NULL);
+ 	osal_hash_destroy(rgn_hash);
+ 	rgn_hash = NULL;
+ 	osal_mutex_unlock(&g_rgnhashlock);
+ 
++	/* Stop + destroy the reaper BEFORE touching the pending table: Rhino
++	 * drops TIMER_CMD_DYN_DEL on an ACTIVE timer, so destroying without a
++	 * prior stop leaks the timer and leaves the callback firing on the
++	 * destroyed g_rgnlock / racing this flush into a double free. */
++	osal_timer_stop(&g_rgn_reaper);
++	osal_timer_destroy_sync(&g_rgn_reaper);
++	g_rgn_reaper.timer = NULL;
++
++	/* flush any canvas still pending deferred free (the hash teardown
++	 * above may have queued new entries) */
++	osal_mutex_lock(&g_rgnlock);
++	for (i = 0; i < RGN_DEFER_FREE_SLOTS; ++i) {
++		if (g_rgn_defer[i].used) {
++			g_rgn_defer[i].used = false;
++			base_ion_free(g_rgn_defer[i].phy_addr);
++		}
++	}
++	osal_mutex_unlock(&g_rgnlock);
++
+ 	osal_memset(rgn_prc_ctx, 0, sizeof(rgn_prc_ctx));
+ 	rgn_num = 0;
+ 	osal_mutex_destroy(&hdlslock);
+@@ -1660,6 +1790,7 @@ int rgn_attach_to_chn(rgn_handle handle, const mmf_chn_s *pchn, const rgn_chn_at
+ 		rgn_prc_ctx[proc_idx].used = true;
+ 	}
+ 
++	osal_memset(&cb_param, 0, sizeof(cb_param));
+ 	cb_param.chn = ctx->chn;
+ 	cb_param.handle = handle;
+ 	if (ctx->canvas_info[ctx->canvas_idx].compressed) {
+@@ -1700,6 +1831,9 @@ int rgn_detach_from_chn(rgn_handle handle, const mmf_chn_s *pchn)
+ 	int ret = OSAL_SUCCESS;
+ 	unsigned int proc_idx;
+ 	int ret_tmp;
++	bool vpss_available = true;
++	bool defer_ok = false;
++	bool probe_ok = false;
+ 	unsigned char i;
+ 	struct _rgn_clr_ow_addr_cb_param cb_param;
+ 
+@@ -1716,6 +1850,33 @@ int rgn_detach_from_chn(rgn_handle handle, const mmf_chn_s *pchn)
+ 
+ 	osal_mutex_lock(&g_rgnlock);
+ 
++	/* Probe VPSS availability first (backport b33772c5): close paths that
++	 * destroy the VPSS grp before OSD detach (e.g. media_dump VIISPReset)
++	 * get the no-wait fast path. The probe runs BEFORE the REMOVE so the
++	 * handle is still in the vpss rgn table, and it also hands back the
++	 * current OW instance used for the CLR below. */
++	if (ctx->region.type == OVERLAY_RGN || ctx->region.type == COVER_RGN) {
++		osal_memset(&cb_param, 0, sizeof(cb_param));
++		cb_param.chn = ctx->chn;
++		cb_param.handle = handle;
++		if (ctx->canvas_info[ctx->canvas_idx].compressed) {
++			cb_param.layer = RGN_ODEC_LAYER_VPSS;
++		} else {
++			cb_param.layer = RGN_NORMAL_LAYER_VPSS;
++		}
++		ret_tmp = _rgn_call_cb(E_MODULE_VPSS, VPSS_CB_GET_RGN_OW_INST, &cb_param);
++		TRACE_RGN(RGN_ERR, "detach probe hdl=%d grp=%d ret=0x%x\n",
++			handle, ctx->chn.dev_id, ret_tmp);
++		if (ret_tmp == 0) {
++			probe_ok = true;
++		} else if (_rgn_cb_is_vpss_unavailable(ret_tmp)) {
++			TRACE_RGN(RGN_INFO, "VPSS is unavailable, detach rgn_handle(%d) locally.\n", handle);
++			vpss_available = false;
++		}
++		/* other probe errors: keep VPSS-alive (conservative wait) and
++		 * no fresh OW instance, so the CLR below is skipped */
++	}
++
+ 	ret = _rgn_update_hw(ctx, RGN_OP_REMOVE);
+ 	if (ret == 0) {
+ 		ctx->chn.mod_id = rgn_prc_ctx[proc_idx].chn.mod_id = ID_BASE;
+@@ -1723,34 +1884,60 @@ int rgn_detach_from_chn(rgn_handle handle, const mmf_chn_s *pchn)
+ 	}
+ 	ctx->odec_data_valid = false;
+ 
+-	/*Waiting for the VPSS to truly close the RGN*/
+-	osal_msleep(200);
++	/* Two layers already stopped new hardware access: the REMOVE dropped
++	 * this rgn from the next job's VPSS config, and the CLR (with the OW
++	 * instance freshly probed above - the attach-time ctx->ow_inst copy
++	 * may be stale) zeroes the GOP OW address register so the current
++	 * scan stops. What remains is one frame period of in-flight access,
++	 * covered by the 60ms deferred free (or RGN_DETACH_WAIT_MS inline). */
++	if (vpss_available && probe_ok &&
++	    (ctx->region.type == OVERLAY_RGN || ctx->region.type == COVER_RGN)) {
++		if (_rgn_call_cb(E_MODULE_VPSS, VPSS_CB_CLR_RGN_OW_ADDR, &cb_param) != 0) {
++			TRACE_RGN(RGN_ERR, "VPSS_CB_CLR_RGN_OW_ADDR is failed\n");
++		}
++	}
++
++	if (vpss_available)
++		defer_ok = true;
+ 
+ 	if (ctx->chn_attr.type == OVERLAY_RGN) {
+-		for (i = 0; i < ctx->region.unattr.overlay.canvas_num; ++i)
+-			if (ctx->canvas_info[i].phy_addr)
+-				base_ion_free(ctx->canvas_info[i].phy_addr);
++		bool slept = false;
++
++		for (i = 0; i < ctx->region.unattr.overlay.canvas_num; ++i) {
++			if (!ctx->canvas_info[i].phy_addr)
++				continue;
++			if (defer_ok && _rgn_defer_queue(handle, ctx->canvas_info[i].phy_addr) == 0)
++				continue;
++			/* slots full after the CLR: ONE frame-period wait covers all
++			 * canvases of this region; defer_ok=false (VPSS dead) frees
++			 * immediately with no wait */
++			if (defer_ok && !slept) {
++				osal_msleep(RGN_DETACH_WAIT_MS);
++				slept = true;
++			}
++			base_ion_free(ctx->canvas_info[i].phy_addr);
++		}
+ 	} else if (ctx->chn_attr.type == OVERLAYEX_RGN) {
+-		for (i = 0; i < ctx->region.unattr.overlay_ex.canvas_num; ++i)
+-			if (ctx->canvas_info[i].phy_addr)
+-				base_ion_free(ctx->canvas_info[i].phy_addr);
+-	} else {
+-		if (ctx->canvas_info[0].phy_addr)
+-			base_ion_free(ctx->canvas_info[0].phy_addr);
+-	}
+-
+-	cb_param.chn = ctx->chn;
+-	cb_param.handle = handle;
+-	if (ctx->canvas_info[ctx->canvas_idx].compressed) {
+-		cb_param.layer = RGN_ODEC_LAYER_VPSS;
++		bool slept = false;
++
++		for (i = 0; i < ctx->region.unattr.overlay_ex.canvas_num; ++i) {
++			if (!ctx->canvas_info[i].phy_addr)
++				continue;
++			if (defer_ok && _rgn_defer_queue(handle, ctx->canvas_info[i].phy_addr) == 0)
++				continue;
++			if (defer_ok && !slept) {
++				osal_msleep(RGN_DETACH_WAIT_MS);
++				slept = true;
++			}
++			base_ion_free(ctx->canvas_info[i].phy_addr);
++		}
+ 	} else {
+-		cb_param.layer = RGN_NORMAL_LAYER_VPSS;
+-	}
+-	cb_param.ow_inst = ctx->ow_inst;
+-
+-	if (ctx->region.type == OVERLAY_RGN || ctx->region.type == COVER_RGN) {
+-		if (_rgn_call_cb(E_MODULE_VPSS, VPSS_CB_CLR_RGN_OW_ADDR, &cb_param) != 0) {
+-			TRACE_RGN(RGN_ERR, "VPSS_CB_CLR_RGN_OW_ADDR is failed\n");
++		if (ctx->canvas_info[0].phy_addr) {
++			if (!(defer_ok && _rgn_defer_queue(handle, ctx->canvas_info[0].phy_addr) == 0)) {
++				if (defer_ok)
++					osal_msleep(RGN_DETACH_WAIT_MS);
++				base_ion_free(ctx->canvas_info[0].phy_addr);
++			}
+ 		}
+ 	}
+ 
+diff --git a/interdrv/vpss/driver/vpss_core.c b/interdrv/vpss/driver/vpss_core.c
+index 0791ef77..3208444c 100644
+--- a/interdrv/vpss/driver/vpss_core.c
++++ b/interdrv/vpss/driver/vpss_core.c
+@@ -201,6 +201,17 @@ static void _vpss_get_mlv_info(unsigned char snr_num, struct mlv_i_s *p_m_lv_i)
+ {
+ }
+ 
++static int _vpss_cb_grp_created(vpss_grp vpss_grp, struct vpss_cores *cores)
++{
++	if (cores == NULL)
++		return 0;
++
++	if (check_vpss_grp_valid(vpss_grp))
++		return 0;
++
++	return cores->ctx.grp_ctx[vpss_grp] && cores->ctx.grp_ctx[vpss_grp]->is_created;
++}
++
+ static int _vpss_get_dev_idx(vpss_grp vpss_grp, vpss_chn vpss_chn, struct vpss_cores *cores)
+ {
+ 	vpss_mode_s vpss_mode = {0};
+@@ -218,6 +229,13 @@ static int _vpss_get_dev_idx(vpss_grp vpss_grp, vpss_chn vpss_chn, struct vpss_c
+ 		return ERR_VPSS_UNEXIST;
+ 	}
+ 
++	if (check_vpss_grp_valid(vpss_grp))
++		return 0;
++
++	if (!cores->ctx.grp_ctx[vpss_grp] || !cores->ctx.grp_ctx[vpss_grp]->is_created) {
++		return 0;
++	}
++
+ 	vpss_mode = cores->vpss_mode;
+ 	dev_id = cores->ctx.grp_ctx[vpss_grp]->dev_id;
+ 
+@@ -277,6 +295,11 @@ static int _vpss_core_cb(void *dev, cb_modules_id caller, u32 cmd, void *arg)
+ 		u32 layer = attr->layer;
+ 		u8 dev_idx = _vpss_get_dev_idx(grp, chn, cores);
+ 
++		if (!_vpss_cb_grp_created(grp, cores)) {
++			rc = ERR_VPSS_UNEXIST;
++			break;
++		}
++
+ 		if (dev_idx > 1)
+ 			layer = 0;
+ 
+@@ -294,6 +317,11 @@ static int _vpss_core_cb(void *dev, cb_modules_id caller, u32 cmd, void *arg)
+ 		u32 layer = attr->layer;
+ 		u8 dev_idx = _vpss_get_dev_idx(grp, chn, cores);
+ 
++		if (!_vpss_cb_grp_created(grp, cores)) {
++			rc = ERR_VPSS_UNEXIST;
++			break;
++		}
++
+ 		if (dev_idx > 1)
+ 			layer = 0;
+ 
+@@ -310,6 +338,11 @@ static int _vpss_core_cb(void *dev, cb_modules_id caller, u32 cmd, void *arg)
+ 		u32 layer = attr->layer;
+ 		u8 dev_idx = _vpss_get_dev_idx(vpss_grp, vpss_chn, cores);
+ 
++		if (!_vpss_cb_grp_created(vpss_grp, cores)) {
++			rc = ERR_VPSS_UNEXIST;
++			break;
++		}
++
+ 		if (dev_idx > 1)
+ 			layer = 0;
+ 
+@@ -330,6 +363,11 @@ static int _vpss_core_cb(void *dev, cb_modules_id caller, u32 cmd, void *arg)
+ 		vpss_grp vpss_grp = attr->chn.dev_id;
+ 		vpss_chn vpss_chn = attr->chn.chn_id;
+ 
++		if (!_vpss_cb_grp_created(vpss_grp, cores)) {
++			rc = ERR_VPSS_UNEXIST;
++			break;
++		}
++
+ 		rc = vpss_set_rgn_coverex_cfg(vpss_grp, vpss_chn, &attr->rgn_coverex_cfg, &cores->ctx);
+ 		break;
+ 	}
+@@ -340,6 +378,11 @@ static int _vpss_core_cb(void *dev, cb_modules_id caller, u32 cmd, void *arg)
+ 		vpss_grp vpss_grp = attr->chn.dev_id;
+ 		vpss_chn vpss_chn = attr->chn.chn_id;
+ 
++		if (!_vpss_cb_grp_created(vpss_grp, cores)) {
++			rc = ERR_VPSS_UNEXIST;
++			break;
++		}
++
+ 		rc = vpss_set_rgn_mosaic_cfg(vpss_grp, vpss_chn, &attr->rgn_mosaic_cfg, &cores->ctx);
+ 		break;
+ 	}
+@@ -351,6 +394,11 @@ static int _vpss_core_cb(void *dev, cb_modules_id caller, u32 cmd, void *arg)
+ 		vpss_grp vpss_grp = attr->chn.dev_id;
+ 		vpss_chn vpss_chn = attr->chn.chn_id;
+ 
++		if (!_vpss_cb_grp_created(vpss_grp, cores)) {
++			rc = ERR_VPSS_UNEXIST;
++			break;
++		}
++
+ 		rc = vpss_set_rgn_lut_cfg(vpss_grp, vpss_chn, rgn_lut_cfg, &cores->ctx);
+ 		break;
+ 	}
+@@ -363,6 +411,11 @@ static int _vpss_core_cb(void *dev, cb_modules_id caller, u32 cmd, void *arg)
+ 		u32 layer = attr->layer;
+ 		u8 dev_idx = _vpss_get_dev_idx(vpss_grp, vpss_chn, cores);
+ 
++		if (!_vpss_cb_grp_created(vpss_grp, cores)) {
++			rc = ERR_VPSS_UNEXIST;
++			break;
++		}
++
+ 		if (dev_idx > 1)
+ 			layer = 0;
+ 
+@@ -378,6 +431,11 @@ static int _vpss_core_cb(void *dev, cb_modules_id caller, u32 cmd, void *arg)
+ 		u32 layer = attr->layer;
+ 		u8 dev_idx = _vpss_get_dev_idx(vpss_grp, vpss_chn, cores);
+ 
++		if (!_vpss_cb_grp_created(vpss_grp, cores)) {
++			rc = ERR_VPSS_UNEXIST;
++			break;
++		}
++
+ 		if (dev_idx > 1)
+ 			layer = 0;
+ 
+@@ -393,6 +451,11 @@ static int _vpss_core_cb(void *dev, cb_modules_id caller, u32 cmd, void *arg)
+ 		u32 layer = attr->layer;
+ 		u8 dev_idx = _vpss_get_dev_idx(vpss_grp, vpss_chn, cores);
+ 
++		if (!_vpss_cb_grp_created(vpss_grp, cores)) {
++			rc = ERR_VPSS_UNEXIST;
++			break;
++		}
++
+ 		if (dev_idx > 1)
+ 			layer = 0;
+ 
+@@ -432,6 +495,11 @@ static int _vpss_core_cb(void *dev, cb_modules_id caller, u32 cmd, void *arg)
+ 		vpss_grp vpss_grp = attr->chn.dev_id;
+ 		vpss_chn vpss_chn = attr->chn.chn_id;
+ 
++		if (!_vpss_cb_grp_created(vpss_grp, cores)) {
++			rc = ERR_VPSS_UNEXIST;
++			break;
++		}
++
+ 		rc = vpss_get_chn_attr(vpss_grp, vpss_chn, &chn_attr, &cores->ctx);
+ 		attr->rect.width = chn_attr.width;
+ 		attr->rect.height = chn_attr.height;
+-- 
+2.25.1
+
