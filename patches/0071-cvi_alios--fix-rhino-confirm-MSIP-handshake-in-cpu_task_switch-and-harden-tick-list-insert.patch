@@ -1,0 +1,197 @@
+From 66d4acdabeba2172e9e6141e1fb6ad021560a8a4 Mon Sep 17 00:00:00 2001
+From: "song.yu" <song.yu@sophgo.com>
+Date: Thu, 15 Oct 2026 10:43:02 +0800
+Subject: [PATCH] fix(rhino): confirm MSIP handshake in cpu_task_switch and
+ harden tick list insert
+
+[description ]:
+Make the port-level task switch handshake explicit and tick list insertion
+idempotent, so a missed software switch interrupt can no longer leave a
+sleeping task running past its block point and degenerate into an infinite
+loop with interrupts disabled that freezes the whole small core.
+
+[root   cause]:
+cpu_task_switch() wrote VIC_TSPDR and returned without confirming the MSIP
+pending bit, so the caller re-enabled interrupts before the software switch
+interrupt was taken. A sleeping task then resumed with task_state still
+K_SLEEP, re-inserted its tick node while still linked, klist_insert()
+degenerated into a self loop and the tick_list_pri_insert scan lost both
+exits, spinning forever with interrupts disabled.
+
+[JIRA      ID]:CV184XSDK-1485
+[chip project]:184x
+[side effects]:
+Adds a bounded MSIP poll (limit 0x10000, worst case well under 1 ms) to every
+task switch; a healthy switch still returns as soon as MSIP is observed
+pending. tick_list_insert now detaches a still-linked node (logged) instead
+of corrupting the list. Validated on cv1842hp_k5556ps_spinand: full build,
+then a 20-task sleep stress test ran 7 hours with no hang and no tick-list
+corruption warnings.
+
+[Affected *.ko/*.so/*.a] :yoc.bin (small-core AliOS image)
+
+Change-Id: I17c79f19dd4d3d9d5021364e451ef03a0e102d57
+---
+ components/rhino/k_tick.c                     | 38 ++++++++++++-
+ .../src/riscv/rv64fd_32gpr/port_s.S           | 53 ++++++++++++++++++-
+ 2 files changed, 88 insertions(+), 3 deletions(-)
+
+diff --git a/components/rhino/k_tick.c b/components/rhino/k_tick.c
+index 7e949517..3de11c48 100755
+--- a/components/rhino/k_tick.c
++++ b/components/rhino/k_tick.c
+@@ -3,12 +3,18 @@
+  */
+ 
+ #include "k_api.h"
++#include <stdio.h>
+ 
+ void tick_list_init(void)
+ {
+    klist_init(&g_tick_head);
+ }
+ 
++/* Runaway guard for the scan below. The tick list can never legally hold this
++ * many nodes; the limit exists so that an already-damaged list cannot spin
++ * here forever with interrupts disabled (which freezes the whole core). */
++#define TICK_LIST_SCAN_LIMIT  4096u
++
+ RHINO_INLINE void tick_list_pri_insert(klist_t *head, ktask_t *task)
+ {
+     tick_t   val;
+@@ -16,13 +22,24 @@ RHINO_INLINE void tick_list_pri_insert(klist_t *head, ktask_t *task)
+     klist_t *list_start;
+     klist_t *list_end;
+     ktask_t *task_iter_temp;
++    uint32_t scan_cnt = 0u;
+ 
+     list_start = head;
+     list_end   = head;
+-
+     val = task->tick_remain;
+ 
+     for (q = list_start->next; q != list_end; q = q->next) {
++        if (++scan_cnt > TICK_LIST_SCAN_LIMIT) {
++            /* The list is already damaged. Drop the ordering hint and append
++             * at the tail so the node still gets tracked: a task whose node is
++             * missing here would never time out, which is worse than running
++             * it slightly late. */
++            printf("[rhino] tick_list: scan limit %u hit, list damaged, appended at tail\r\n",
++                   (unsigned)TICK_LIST_SCAN_LIMIT);
++            q = list_end;
++            break;
++        }
++
+         task_iter_temp = krhino_list_entry(q, ktask_t, tick_list);
+         if ((task_iter_temp->tick_match - g_tick_count) > val) {
+             break;
+@@ -36,6 +53,25 @@ void tick_list_insert(ktask_t *task, tick_t time)
+ {
+     task->tick_match  = g_tick_count + time;
+     task->tick_remain = time;
++
++    /* Idempotence. If the node is still linked, inserting again would make
++     * klist_insert() stop on the task's own node and degenerate into a self
++     * loop (next = prev = itself). A self loop never returns to g_tick_head,
++     * and at that instant tick_match - g_tick_count == tick_remain == val, so
++     * neither exit of the scan above can be taken -- the core would spin here
++     * forever with interrupts disabled.
++     *
++     * The membership test is deliberate: callers set task_state either before
++     * (krhino_task_sleep) or after (pend_to_blk_obj) this call, so only the
++     * list itself is a reliable indicator of "already queued". Detaching and
++     * re-inserting also keeps the deadline consistent with the new request,
++     * which simply refusing the call would not. */
++    if (task->tick_list.next != &task->tick_list) {
++        printf("[rhino] tick_list: task %p (%s) still linked, detached before re-insert\r\n",
++               task, task->task_name ? task->task_name : "?");
++        klist_rm_init(&task->tick_list);
++    }
++
+     tick_list_pri_insert(&g_tick_head, task);
+ }
+ 
+diff --git a/components/rhino_arch/src/riscv/rv64fd_32gpr/port_s.S b/components/rhino_arch/src/riscv/rv64fd_32gpr/port_s.S
+index ff649577..bf5f4910 100644
+--- a/components/rhino_arch/src/riscv/rv64fd_32gpr/port_s.S
++++ b/components/rhino_arch/src/riscv/rv64fd_32gpr/port_s.S
+@@ -41,6 +41,20 @@
+ @                                 EQUATES
+ @******************************************************************************/
+ .equ RISCV_MSTATUS_MIE,        (1<<3)       /*machine-level interrupt bit*/
++.equ RISCV_MIP_MSIP,           (1<<3)       /*machine software interrupt pending*/
++
++/* Upper bound for the MSIP handshake spins in cpu_task_switch / the switch
++ * handler. Writing VIC_TSPDR is expected to raise MSIP within a handful of
++ * cycles, so this limit is ~3 orders of magnitude above the real latency and
++ * will not be reached in normal operation.
++ *
++ * It exists so that a VIC which never responds cannot park the core in a spin
++ * loop with interrupts disabled -- strictly worse than the missed-switch bug
++ * the handshake fixes. Kept deliberately modest (worst case well under a
++ * millisecond, still thousands of times the expected latency) so that in that
++ * failure mode the system stays slow-but-responsive enough to be diagnosed,
++ * rather than spending milliseconds in every context switch. */
++.equ RHINO_TSPDR_SPIN_LIMIT,   0x10000
+ 
+ /******************************************************************************
+ @                        CODE GENERATION DIRECTIVES
+@@ -68,8 +82,29 @@ cpu_intrpt_restore:
+ @******************************************************************************/
+ cpu_task_switch:
+     li      t0, VIC_TSPDR
+-    li      t2, 0x1    
++    li      t2, 0x1
+     sw      t2, 0(t0)
++
++    /* Order the request store before the MSIP poll below. */
++    fence   iorw, iorw
++
++    /* Do not return until the switch request is actually pending. Without this
++     * the caller can restore MIE before the VIC has raised MSIP: the software
++     * interrupt is then never taken, the sleeping task resumes with
++     * task_state == K_SLEEP and re-inserts itself into the tick list, which
++     * collapses into a self loop and hangs the core with interrupts disabled.
++     *
++     * The spin is bounded. If the VIC never raises MSIP we return early and
++     * leave the request pending, instead of parking the core here with MIE
++     * already off (strictly worse than the missed-switch bug being fixed). */
++    li      t1, RHINO_TSPDR_SPIN_LIMIT
++.Ltask_switch_wait_pending:
++    csrr    t3, mip
++    andi    t3, t3, RISCV_MIP_MSIP
++    bnez    t3, .Ltask_switch_pending_ok
++    addi    t1, t1, -1
++    bnez    t1, .Ltask_switch_wait_pending
++.Ltask_switch_pending_ok:
+     ret
+ 
+ cpu_intrpt_switch:
+@@ -247,9 +282,23 @@ __task_switch_nosave:
+     lwu     sp, (a2)
+ 
+     li      t0, VIC_TSPDR
+-    li      t2, 0x0    
++    li      t2, 0x0
+     sw      t2, 0(t0)
+ 
++    /* Confirm the previous request is withdrawn before restoring the incoming
++     * task. A stale MSIP left over from this switch would make the next
++     * cpu_task_switch() poll succeed immediately and return without the request
++     * ever having been propagated. Bounded for the same reason as above. */
++    fence   iorw, iorw
++    li      t1, RHINO_TSPDR_SPIN_LIMIT
++.Ltask_switch_wait_clear:
++    csrr    t3, mip
++    andi    t3, t3, RISCV_MIP_MSIP
++    beqz    t3, .Ltask_switch_cleared_ok
++    addi    t1, t1, -1
++    bnez    t1, .Ltask_switch_wait_clear
++.Ltask_switch_cleared_ok:
++
+     lwu     t0, (124 +124)(sp)
+     csrs    mstatus, t0
+ 
+-- 
+2.25.1
+
