@@ -1,0 +1,81 @@
+From f42c71e49e497d2ded3dc5449b876297cfc08ad1 Mon Sep 17 00:00:00 2001
+From: "yicong.wu" <yicong.wu@sophgo.com>
+Date: Thu, 15 Oct 2026 17:24:40 +0800
+Subject: [PATCH] fix: skip PiP composition when the base frame is missing
+
+Drop the current small-frame input before reserving hardware buffers when DC100 PiP has no software base. Preserve the last complete preview frame and resume on the next input.
+
+Change-Id: I16118a6a75e5d27d9c42aea604669a2285112a3f
+---
+ interdrv/vpss/driver/vpss.c | 48 +++++++++++++++++++++++++++++++++++++
+ 1 file changed, 48 insertions(+)
+
+diff --git a/interdrv/vpss/driver/vpss.c b/interdrv/vpss/driver/vpss.c
+index 236f8892..7a86f3bf 100644
+--- a/interdrv/vpss/driver/vpss.c
++++ b/interdrv/vpss/driver/vpss.c
+@@ -9,6 +9,48 @@
+ #include "base_cb.h"
+ #include "vbq.h"
+ 
++/* DC100 record PiP uses grp3/chn0 as a partial overwrite of the software base. */
++static int vpss_missing_base_chn(struct vpss_grp_ctx *grp_ctx, unsigned char working_mask)
++{
++	vpss_chn chn_id;
++
++	if (grp_ctx->online_from_isp || grp_ctx->grp_id != 3)
++		return -1;
++	for (chn_id = 0; chn_id < grp_ctx->chn_max_num; chn_id++) {
++		struct vpss_chn_ctx *chn_ctx = &grp_ctx->chn_ctxs[chn_id];
++		vpss_chn_attr_s *attr = &chn_ctx->chn_attr;
++		rect_s *rect = &attr->aspect_ratio.video_rect;
++
++		if (chn_id != 0 || !(working_mask & BIT(chn_id)) || !chn_ctx->is_enabled ||
++		    chn_ctx->is_drop || chn_ctx->buf_wrap.enable)
++			continue;
++		if (attr->aspect_ratio.mode != ASPECT_RATIO_MANUAL ||
++		    attr->aspect_ratio.enable_bgcolor)
++			continue;
++		if (rect->x == 0 && rect->y == 0 && rect->width == attr->width &&
++		    rect->height == attr->height)
++			continue;
++		if (base_mod_jobs_waitq_empty(&grp_ctx->vb_jobs.outs[chn_id]))
++			return chn_id;
++	}
++	return -1;
++}
++
++/* The input semaphore was consumed by the handler; do not requeue this skip. */
++static bool vpss_skip_missing_base(struct vpss_grp_ctx *grp_ctx, unsigned char working_mask)
++{
++	vb_blk blk;
++
++	if (vpss_missing_base_chn(grp_ctx, working_mask) < 0)
++		return false;
++	blk = base_mod_jobs_waitq_pop(&grp_ctx->vb_jobs.ins);
++	if (blk != VB_INVALID_HANDLE) {
++		vb_release_block(blk);
++		grp_ctx->grp_work_status.lost_cnt++;
++	}
++	return true;
++}
++
+ static int _mesh_gdc_do_op_cb(enum gdc_usage usage, const void *usage_param,
+ 				struct vb_s *vb_in, pixel_format_e pixel_format, unsigned long long mesh_addr,
+ 				unsigned char sync_io, void *pcb_param, unsigned int param_size,
+@@ -1582,6 +1624,12 @@ static int vpss_try_schedule(int working_grp, struct vpss_ctx *ctx)
+ 		goto vpss_next_job;
+ 	}
+ 
++	/* Reject a base-less PiP job before reserving buffers or touching hardware. */
++	if (vpss_skip_missing_base(grp_ctx, working_mask)) {
++		osal_mutex_unlock(&grp_ctx->lock);
++		return -1;
++	}
++
+ 	// commit hw settings of this vpss-grp.
+ 	if (commit_hw_settings(grp_ctx) != 0) {
+ 		TRACE_VPSS(DBG_ERR, "grp(%d) apply hw settings NG.\n", working_grp);
+-- 
+2.25.1
+
