@@ -2,7 +2,7 @@ project_name: sophcam
 commit_id: 4b4eda3e026a182c6319787225a1ce954c73da18 fix: provide DC100 recorder clock calibration
 
 project_name: comps_install
-commit_id: dc07cd2bb5bcce324c587210a1fa1438701f2c19 fix: release playback and recording timeline components
+commit_id: 888997f00b1387a4fc5af6b6e411adb9a5054075 fix: include stdbool in public file recovery header
 
 project_name: common_files
 commit_id: 4be0f1e27f22445c11be837dcfaf4be87b8389d8 [refactor] sync log level
