@@ -1,8 +1,8 @@
 project_name: sophcam
-commit_id: aa1f9cc7dd59c4699dffe12f6efa2e717b863d5e feat:use battery cell
+commit_id: 4b4eda3e026a182c6319787225a1ce954c73da18 fix: provide DC100 recorder clock calibration
 
 project_name: comps_install
-commit_id: 7426ac91c35f7d32d587f30df75a42de18ab2a4e fix:avoid non-monotonically increasing dts in audio muxing
+commit_id: dc07cd2bb5bcce324c587210a1fa1438701f2c19 fix: release playback and recording timeline components
 
 project_name: common_files
 commit_id: 4be0f1e27f22445c11be837dcfaf4be87b8389d8 [refactor] sync log level
@@ -20,4 +20,4 @@ project_name: turnkey
 commit_id: 14e8f8f9774ee2f775152642776f621ca1a29147 [fix](file-dir):fix file dir [description ]:NA [root   cause]:NA [JIRA      ID]:CV184XSDK-760 [chip project]:NA [side effects]:NA [Affected *.ko/*.so/*.a] :NA
 
 project_name: dc100
-commit_id: 1aad587d95c0c9e5e915eaeed48e84d97df9c68f fix:fix some UI bug
+commit_id: c14234fbe941766b38a0e79bb934ffccc0615359 feat(power): 新增下载与APP播放状态保持，完善自动关机判断条件

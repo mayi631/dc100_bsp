@@ -1,0 +1,13 @@
+DC100 playback and recording component release, 2026-10-16
+
+Use the pinned sophcam, dc100 UI and comps_install commits in
+manifest/git_version_sophcam_master-github.txt together.
+The component package updates player, muxer and recorder static/shared libraries,
+and recorder/include/recorder.h. Source implementation is not distributed here.
+
+Rebuild the entire APP after updating: the recorder callback structure changed layout.
+Keep GFBG tde_rot=0 for the pinned UI CPU rotation.
+APP link against these libraries and headers has been verified with current BSP/OSS dependencies.
+Player timing/seek/replay and recording timeline host regressions pass.
+A full customer SDK reconstruction and fresh board acceptance remain separate checks.
+No UI tree, USB serial override or automatic-power/screen debug setting is released.
